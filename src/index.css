@@ -1,0 +1,233 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&family=Inter:wght@100;200;300;400;500;600;700;800;900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Cormorant Garamond", serif;
+  --font-sans: "Inter", sans-serif;
+  
+  --color-gold: #C5A059;
+  --color-dark: #121212;
+  --color-paper: #F5F2ED;
+}
+
+@utility no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.luxury-text-shadow {
+  text-shadow: 0 2px 15px rgba(0, 0, 0, 0.15);
+}
+
+@layer base {
+  body {
+    @apply bg-paper text-dark font-sans;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-serif;
+  }
+}
+
+.glass-card {
+  @apply bg-white/80 backdrop-blur-md border border-white/20 shadow-xl;
+}
+
+.btn-primary {
+  @apply bg-dark text-paper px-8 py-3 rounded-full hover:bg-gold hover:text-dark transition-all duration-500 ease-out font-medium uppercase tracking-widest text-xs hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0;
+}
+
+.btn-outline {
+  @apply border border-dark/20 px-8 py-3 rounded-full hover:border-dark transition-all duration-500 ease-out font-medium uppercase tracking-widest text-xs hover:bg-dark/5 hover:-translate-y-0.5 active:translate-y-0;
+}
+
+/* FullCalendar Customization */
+.admin-calendar .fc {
+  @apply font-sans;
+  --fc-border-color: rgba(0, 0, 0, 0.06);
+  --fc-button-bg-color: #ffffff;
+  --fc-button-border-color: rgba(0, 0, 0, 0.1);
+  --fc-button-text-color: #1a1a1a;
+  --fc-button-hover-bg-color: #f9fafb;
+  --fc-button-hover-border-color: rgba(0, 0, 0, 0.2);
+  --fc-button-active-bg-color: #1a1a1a;
+  --fc-button-active-border-color: #1a1a1a;
+  --fc-today-bg-color: rgba(197, 160, 89, 0.03);
+  --fc-event-bg-color: #e0f2fe;
+  --fc-event-border-color: transparent;
+  --fc-event-text-color: #1a1a1a;
+  background: #ffffff;
+}
+
+.admin-calendar .fc-view-harness {
+  background: #ffffff;
+}
+
+.admin-calendar .fc-event {
+  @apply shadow-sm;
+  border-radius: 8px !important;
+  padding: 4px 8px !important;
+  border: 1px solid rgba(0, 0, 0, 0.05) !important;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.admin-calendar .fc-event:hover {
+  @apply shadow-md;
+  transform: translateY(-1px);
+  filter: brightness(0.98);
+  z-index: 50 !important;
+}
+
+/* Pastel variants for different event types */
+.admin-calendar .event-coupe {
+  background-color: #f0f9ff !important; /* Pastel Bleu */
+  border-left: 4px solid #0ea5e9 !important;
+}
+
+.admin-calendar .event-coupe-barbe {
+  background-color: #f0fdf4 !important; /* Pastel Vert */
+  border-left: 4px solid #22c55e !important;
+}
+
+.admin-calendar .event-unavailability {
+  background-color: #fef2f2 !important; /* Pastel Rouge */
+  border-left: 4px solid #ef4444 !important;
+}
+
+.admin-calendar .event-booking {
+  background-color: #f8fafc !important; /* Par défaut gris très clair */
+  border-left: 4px solid #94a3b8 !important;
+}
+
+.admin-calendar .event-local-only {
+  opacity: 0.85;
+}
+
+.admin-calendar .event-orphaned {
+  opacity: 0.85;
+}
+
+.admin-calendar .fc-event-main {
+  color: #1a1a1a !important;
+  padding: 0 !important;
+}
+
+.admin-calendar .fc-event-time {
+  @apply font-medium block mb-0.5 opacity-60;
+  font-size: 10px !important;
+  color: #1a1a1a !important;
+}
+
+.admin-calendar .fc-event-title {
+  @apply font-semibold block leading-tight truncate;
+  font-size: 12px !important;
+  color: #1a1a1a !important;
+}
+
+.admin-calendar .fc-timegrid-slot {
+  height: 60px !important; /* More airy */
+}
+
+.admin-calendar .fc-timegrid-slot-minor {
+  border-top-style: dotted !important;
+  opacity: 0.3;
+}
+
+.admin-calendar .fc-timegrid-axis-cushion,
+.admin-calendar .fc-timegrid-slot-label-cushion {
+  @apply font-medium text-dark/40;
+  font-size: 11px !important;
+}
+
+.admin-calendar .fc-col-header-cell {
+  @apply bg-white py-4;
+}
+
+.admin-calendar .fc-col-header-cell-cushion {
+  @apply font-sans font-bold uppercase tracking-wider;
+  font-size: 0.75rem !important;
+  color: #6b7280 !important;
+}
+
+.admin-calendar .fc-toolbar-title {
+  @apply font-sans font-bold text-xl tracking-tight;
+  font-family: var(--font-sans) !important;
+  font-size: 1.25rem !important;
+  color: #111827 !important;
+}
+
+.admin-calendar .fc-button {
+  @apply rounded-xl px-4 py-2 text-xs uppercase tracking-widest font-bold transition-all shadow-none;
+  border-radius: 0.75rem !important;
+  padding: 0.5rem 1rem !important;
+  font-size: 0.7rem !important;
+  text-transform: uppercase !important;
+}
+
+.admin-calendar .fc-button-primary:not(:disabled).fc-button-active,
+.admin-calendar .fc-button-primary:not(:disabled):active {
+  @apply bg-dark text-paper border-dark;
+  background-color: #121212 !important;
+  color: #F5F2ED !important;
+  border-color: #121212 !important;
+}
+
+/* Slot selection styles */
+.slot-btn {
+  @apply py-3 rounded-xl text-sm transition-all duration-300 border-2 border-gold bg-transparent text-gold cursor-pointer font-serif;
+}
+
+.slot-btn:hover {
+  @apply bg-gold text-dark;
+}
+
+.slot-btn.selected {
+  @apply bg-gold text-dark font-bold shadow-md;
+}
+
+.slots-placeholder {
+  @apply text-dark/40 italic text-sm py-8 text-center bg-dark/5 rounded-2xl w-full;
+}
+
+.slots-loading {
+  @apply text-gold animate-pulse text-center py-8 w-full;
+}
+
+/* Mobile Calendar Adjustments */
+@media (max-width: 767px) {
+  .admin-calendar .fc-toolbar-title {
+    font-size: 1.1rem !important;
+  }
+  
+  .admin-calendar .fc-col-header-cell-cushion {
+    font-size: 0.9rem !important;
+    padding: 4px 0 !important;
+  }
+  
+  .admin-calendar .fc-timegrid-slot {
+    height: 40px !important;
+  }
+  
+  .admin-calendar .fc-event-title {
+    font-size: 11px !important;
+  }
+  
+  .admin-calendar .fc-event-time {
+    font-size: 9px !important;
+  }
+
+  .admin-calendar .fc-button {
+    padding: 0.4rem 0.6rem !important;
+    font-size: 0.65rem !important;
+  }
+
+  .admin-calendar .fc-header-toolbar {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+}
