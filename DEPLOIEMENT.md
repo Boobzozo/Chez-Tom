@@ -104,7 +104,7 @@ Le payload de réservation transmet notamment `customer_name`, `customer_email`,
 
 ## 6. Après la mise en ligne
 
-1. Se connecter à l'espace gérant (⚙ en pied de page) et **changer le mot de passe** (`admin123`).
+1. Se connecter à l'espace gérant sur `https://votre-domaine.fr/admin` et **changer le mot de passe** (`admin123`).
 2. Renseigner prestations, horaires et galerie depuis l'espace gérant.
 3. Lier Google Calendar (bouton dans Configuration) si souhaité — nécessite
    `APP_URL`, `GOOGLE_CLIENT_ID` et `GOOGLE_CLIENT_SECRET`, et l'URL de redirection

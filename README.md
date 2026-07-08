@@ -19,7 +19,9 @@ C'est tout : le serveur Express sert aussi le front (via Vite en dev, via `dist/
 La base SQLite (`chez-tom.db`) se crée automatiquement au premier lancement, avec des
 prestations et horaires par défaut.
 
-**Espace gérant** : bouton discret en bas du site (icône ⚙ dans le pied de page).
+**Espace gérant** : accessible sur **`/admin`** (ex. `http://localhost:3000/admin`
+en local, `https://votre-domaine.fr/admin` en ligne — aucun lien visible sur le site public,
+et la page est exclue des moteurs de recherche via `robots.txt`).
 Mot de passe initial : `admin123` — **à changer immédiatement** depuis
 Espace Gérant → Configuration → « Changer le mot de passe gérant ».
 

@@ -336,7 +336,7 @@ const Gallery = () => {
 };
 
 
-const Footer = ({ openingHours, onAdminClick, isAdmin }: { openingHours: Record<string, DayHours>, onAdminClick: () => void, isAdmin: boolean }) => {
+const Footer = ({ openingHours }: { openingHours: Record<string, DayHours> }) => {
   const formatDay = (day: string) => {
     const names: Record<string, string> = {
       monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi',
@@ -394,12 +394,7 @@ const Footer = ({ openingHours, onAdminClick, isAdmin }: { openingHours: Record<
         </div>
       </div>
       <div className="max-w-7xl mx-auto mt-24 pt-8 border-t border-paper/5 text-center text-[10px] uppercase tracking-widest text-paper/20">
-        <button 
-          onClick={onAdminClick}
-          className="hover:text-gold transition-colors cursor-default"
-        >
-          &copy; {new Date().getFullYear()} Chez Tom. Tous droits réservés.
-        </button>
+        <span>&copy; {new Date().getFullYear()} Chez Tom. Tous droits réservés.</span>
       </div>
     </footer>
   );
@@ -465,9 +460,13 @@ export default function App() {
   );
 }
 
+// L'espace gérant vit sur /admin (ex. https://chez-tom.fr/admin) —
+// aucun point d'entrée visible sur le site public.
+const isAdminRoute = window.location.pathname.replace(/\/+$/, '') === '/admin';
+
 function AppContent() {
   const [isAdmin, setIsAdmin] = useState(false);
-  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [sessionChecked, setSessionChecked] = useState(!isAdminRoute);
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loggingIn, setLoggingIn] = useState(false);
@@ -527,8 +526,13 @@ function AppContent() {
     fetchSettings();
     fetchServices();
     fetchCategories();
-    // Restaure la session admin si un token valide est encore présent.
-    checkAdminSession().then((ok) => ok && setIsAdmin(true));
+    // Sur /admin : restaure la session si un token valide est encore présent.
+    if (isAdminRoute) {
+      checkAdminSession().then((ok) => {
+        if (ok) setIsAdmin(true);
+        setSessionChecked(true);
+      });
+    }
   }, []);
 
   const updateSetting = async (key: string, value: any) => {
@@ -548,7 +552,6 @@ function AppContent() {
     setLoggingIn(false);
     if (result.ok) {
       setIsAdmin(true);
-      setShowAdminLogin(false);
       setPassword('');
     } else {
       setLoginError(result.error ?? 'Mot de passe incorrect');
@@ -557,7 +560,8 @@ function AppContent() {
 
   const handleLogout = () => {
     adminLogout();
-    setIsAdmin(false);
+    // Retour au site public après déconnexion.
+    window.location.href = '/';
   };
 
   let mainOpeningHours = {};
@@ -567,101 +571,112 @@ function AppContent() {
     console.error("Error parsing main opening hours", e);
   }
 
+  // --- Espace gérant, sur /admin uniquement ---
+  if (isAdminRoute) {
+    if (!sessionChecked) {
+      return (
+        <div className="min-h-screen bg-paper flex items-center justify-center">
+          <span className="mono-label text-muted-deep animate-pulse">Chez Tom…</span>
+        </div>
+      );
+    }
+
+    if (isAdmin) {
+      return (
+        <div className="min-h-screen selection:bg-gold selection:text-dark">
+          <Navbar isAdmin={isAdmin} />
+          <Suspense
+            fallback={
+              <div className="min-h-screen flex items-center justify-center">
+                <span className="mono-label text-muted-deep animate-pulse">Chargement de l'espace gérant…</span>
+              </div>
+            }
+          >
+            <AdminDashboard
+              onLogout={handleLogout}
+              settings={settings}
+              updateSetting={updateSetting}
+              services={services}
+              fetchServices={fetchServices}
+              categories={categories}
+              fetchCategories={fetchCategories}
+            />
+          </Suspense>
+        </div>
+      );
+    }
+
+    // Écran de connexion dédié
+    return (
+      <div className="min-h-screen bg-paper flex items-center justify-center p-6 selection:bg-gold selection:text-dark">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-sm"
+        >
+          <div className="text-center mb-8">
+            <div className="text-2xl font-serif font-bold tracking-[0.3em] text-dark">CHEZ TOM</div>
+            <div className="mono-label text-gold-deep mt-3">Espace gérant</div>
+          </div>
+          <div className="bg-white border border-hairline rounded-[4px] p-8 shadow-sm">
+            <label htmlFor="admin-password" className="mono-label text-muted-deep block mb-2">Mot de passe</label>
+            <input
+              id="admin-password"
+              type="password"
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); setLoginError(null); }}
+              autoFocus
+              autoComplete="current-password"
+              className="w-full bg-white border border-hairline rounded-[3px] px-4 py-3 mb-3 outline-none focus:border-dark transition-colors"
+              onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
+            />
+            {loginError && (
+              <p role="alert" className="text-sm mb-3" style={{ color: '#B23A2B' }}>{loginError}</p>
+            )}
+            <button onClick={handleAdminLogin} disabled={loggingIn || !password} className="w-full btn-primary py-3 mt-2">
+              {loggingIn ? 'Vérification…' : 'Entrer'}
+            </button>
+          </div>
+          <a href="/" className="btn-ghost mx-auto mt-8 w-fit flex">
+            <span className="w-4 h-px bg-muted-deep" />
+            Retour au site
+          </a>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // --- Site public ---
   return (
     <div className="min-h-screen selection:bg-gold selection:text-dark">
-      <Navbar isAdmin={isAdmin} />
+      <Navbar isAdmin={false} />
+      <Hero />
+      <Services services={services} categories={categories} />
 
-      {isAdmin ? (
-        <Suspense
-          fallback={
-            <div className="min-h-screen flex items-center justify-center">
-              <span className="mono-label text-muted-deep animate-pulse">Chargement de l'espace gérant…</span>
-            </div>
-          }
-        >
-          <AdminDashboard
-            onLogout={handleLogout}
-            settings={settings}
-            updateSetting={updateSetting}
-            services={services}
-            fetchServices={fetchServices}
-            categories={categories}
-            fetchCategories={fetchCategories}
-          />
-        </Suspense>
-      ) : (
-        <>
-          <Hero />
-          <Services services={services} categories={categories} />
-          
-          {settings?.show_gallery === 'true' && <Gallery />}
+      {settings?.show_gallery === 'true' && <Gallery />}
 
-          <BookingSection services={services} categories={categories} openingHours={mainOpeningHours} />
-          
-          {settings?.show_about === 'true' && (
-            <section className="py-32 px-6 bg-white overflow-hidden">
-              <motion.div 
-                initial={{ opacity: 0, y: 50 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, margin: "-100px" }}
-                transition={{ duration: 1, ease: "easeOut" }}
-                className="max-w-4xl mx-auto text-center"
-              >
-                <h2 className="text-4xl font-serif mb-2">L'histoire de Chez Tom</h2>
-                <div className="w-12 h-[1px] bg-gold mx-auto mb-12"></div>
-                <p className="text-lg text-dark/60 leading-relaxed italic px-8">
-                  "Passionné par l'art du barbier depuis plus de 10 ans, j'ai créé ce salon pour offrir aux hommes un espace où le temps s'arrête. Ici, on ne vient pas seulement pour une coupe, mais pour un moment de détente et de soin."
-                </p>
-                <div className="mt-12 font-serif text-xl tracking-widest">— Tom, Fondateur</div>
-              </motion.div>
-            </section>
-          )}
-          
-          <Footer 
-            openingHours={mainOpeningHours} 
-            isAdmin={isAdmin}
-            onAdminClick={() => isAdmin ? setIsAdmin(false) : setShowAdminLogin(true)}
-          />
-        </>
+      <BookingSection services={services} categories={categories} openingHours={mainOpeningHours} />
+
+      {settings?.show_about === 'true' && (
+        <section className="py-32 px-6 bg-white overflow-hidden">
+          <motion.div
+            initial={{ opacity: 0, y: 50 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: "-100px" }}
+            transition={{ duration: 1, ease: "easeOut" }}
+            className="max-w-4xl mx-auto text-center"
+          >
+            <h2 className="text-4xl font-serif mb-2">L'histoire de Chez Tom</h2>
+            <div className="w-12 h-[1px] bg-gold mx-auto mb-12"></div>
+            <p className="text-lg text-dark/60 leading-relaxed italic px-8">
+              "Passionné par l'art du barbier depuis plus de 10 ans, j'ai créé ce salon pour offrir aux hommes un espace où le temps s'arrête. Ici, on ne vient pas seulement pour une coupe, mais pour un moment de détente et de soin."
+            </p>
+            <div className="mt-12 font-serif text-xl tracking-widest">— Tom, Fondateur</div>
+          </motion.div>
+        </section>
       )}
 
-      {/* Admin Login Modal */}
-      <AnimatePresence>
-        {showAdminLogin && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-dark/80 backdrop-blur-sm flex items-center justify-center p-6"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="bg-paper p-8 rounded-[4px] max-w-sm w-full shadow-2xl"
-            >
-              <h3 className="text-2xl font-serif mb-6 text-center">Accès Gérant</h3>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => { setPassword(e.target.value); setLoginError(null); }}
-                placeholder="Mot de passe"
-                autoFocus
-                className="w-full bg-white border border-dark/10 rounded-[3px] px-4 py-3 mb-3 outline-none focus:border-gold transition-colors"
-                onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
-              />
-              {loginError && (
-                <p role="alert" className="text-sm mb-3 text-center" style={{ color: '#B23A2B' }}>{loginError}</p>
-              )}
-              <div className="flex gap-4 mt-3">
-                <button onClick={() => { setShowAdminLogin(false); setLoginError(null); }} className="flex-1 btn-outline py-2">Annuler</button>
-                <button onClick={handleAdminLogin} disabled={loggingIn || !password} className="flex-1 btn-primary py-2">
-                  {loggingIn ? 'Vérification…' : 'Entrer'}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <Footer openingHours={mainOpeningHours} />
     </div>
   );
 }
