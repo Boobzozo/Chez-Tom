@@ -6,3 +6,8 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Base SQLite locale (données de dev)
+*.db
+*.db-journal
+*.db-wal

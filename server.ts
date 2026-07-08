@@ -9,6 +9,7 @@ import { Resend } from "resend";
 import axios from "axios";
 import { Server } from "socket.io";
 import http from "http";
+import crypto from "crypto";
 
 dotenv.config();
 
@@ -24,6 +25,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     customer_name TEXT NOT NULL,
     customer_email TEXT NOT NULL,
+    customer_phone TEXT,
     service_type TEXT NOT NULL,
     start_time TEXT NOT NULL,
     end_time TEXT NOT NULL,
@@ -64,7 +66,8 @@ db.exec(`
     name TEXT NOT NULL,
     price REAL NOT NULL,
     duration INTEGER NOT NULL,
-    category_id TEXT
+    category_id TEXT,
+    description TEXT
   );
 
   CREATE TABLE IF NOT EXISTS categories (
@@ -92,10 +95,12 @@ if (categoriesCount.count === 0) {
 
 const servicesCount = db.prepare("SELECT COUNT(*) as count FROM services").get() as { count: number };
 if (servicesCount.count === 0) {
-  const insert = db.prepare("INSERT INTO services (id, name, price, duration, category_id) VALUES (?, ?, ?, ?, ?)");
-  insert.run("coupe-homme", "Coupe Homme", 20, 30, "adultes");
-  insert.run("coupe-barbe", "Coupe + Barbe", 30, 45, "adultes");
-  insert.run("coupe-enfant", "Coupe Enfant (-12 ans)", 15, 20, "enfants");
+  const insert = db.prepare("INSERT INTO services (id, name, price, duration, category_id, description) VALUES (?, ?, ?, ?, ?, ?)");
+  insert.run("coupe-homme", "Coupe Homme", 20, 30, "adultes", "Shampoing, coupe aux ciseaux ou à la tondeuse, coiffage");
+  insert.run("coupe-barbe", "Coupe + Barbe", 30, 45, "adultes", "Coupe complète et taille de barbe au rasoir");
+  insert.run("barbe", "Taille de barbe", 15, 20, "adultes", "Rasoir traditionnel et serviette chaude");
+  insert.run("rituel", "Rituel signature", 55, 75, "adultes", "Coupe, barbe, soin du visage et massage crânien");
+  insert.run("coupe-enfant", "Coupe Enfant (-12 ans)", 15, 20, "enfants", "Coupe adaptée, en douceur");
 }
 
 // Migration: Add category_id column if it doesn't exist
@@ -111,6 +116,96 @@ try {
 } catch (e) {
   // Column already exists or other error
 }
+
+// Migration: Add customer_phone column if it doesn't exist
+try {
+  db.prepare("ALTER TABLE bookings ADD COLUMN customer_phone TEXT").run();
+} catch (e) {
+  // Column already exists or other error
+}
+
+// Migration: Add description column to services if it doesn't exist
+try {
+  db.prepare("ALTER TABLE services ADD COLUMN description TEXT").run();
+} catch (e) {
+  // Column already exists or other error
+}
+
+// ---------------------------------------------------------------------------
+// Sécurité admin : hash du mot de passe + tokens de session + rate limiting
+// ---------------------------------------------------------------------------
+
+const hashPassword = (password: string) => {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+  return `scrypt:${salt}:${hash}`;
+};
+
+const verifyPassword = (password: string, stored: string | undefined) => {
+  if (!password || !stored || !stored.startsWith("scrypt:")) return false;
+  const [, salt, hash] = stored.split(":");
+  const candidate = crypto.scryptSync(password, salt, 64);
+  const expected = Buffer.from(hash, "hex");
+  return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
+};
+
+// Migration : si le mot de passe admin est encore en clair, on le hashe.
+{
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'admin_password'").get() as { value: string } | undefined;
+  if (row && !row.value.startsWith("scrypt:")) {
+    db.prepare("UPDATE settings SET value = ? WHERE key = 'admin_password'").run(hashPassword(row.value));
+    console.log("[sécurité] Mot de passe admin hashé (scrypt).");
+  }
+}
+
+// Tokens de session admin, en mémoire (invalidés au redémarrage).
+const ADMIN_TOKEN_TTL = 24 * 60 * 60 * 1000; // 24 h
+const adminTokens = new Map<string, number>();
+
+const createAdminToken = () => {
+  const token = crypto.randomBytes(32).toString("hex");
+  adminTokens.set(token, Date.now() + ADMIN_TOKEN_TTL);
+  return token;
+};
+
+const isValidAdminToken = (token: string | undefined) => {
+  if (!token) return false;
+  const expiry = adminTokens.get(token);
+  if (!expiry) return false;
+  if (Date.now() > expiry) {
+    adminTokens.delete(token);
+    return false;
+  }
+  return true;
+};
+
+const bearerToken = (header: string | undefined) =>
+  header?.startsWith("Bearer ") ? header.slice(7) : undefined;
+
+const requireAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (!isValidAdminToken(bearerToken(req.headers.authorization))) {
+    return res.status(401).json({ error: "Non autorisé" });
+  }
+  next();
+};
+
+// Rate limiting simple en mémoire (par IP).
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+const rateLimit = (bucket: string, maxAttempts: number, windowMs: number) =>
+  (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const key = `${bucket}:${req.ip}`;
+    const now = Date.now();
+    const entry = rateBuckets.get(key);
+    if (!entry || now > entry.resetAt) {
+      rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+      return next();
+    }
+    entry.count++;
+    if (entry.count > maxAttempts) {
+      return res.status(429).json({ error: "Trop de tentatives. Réessayez plus tard." });
+    }
+    next();
+  };
 
 async function getGoogleAccessToken() {
   const token = db.prepare("SELECT * FROM google_tokens WHERE id = 1").get() as any;
@@ -146,13 +241,20 @@ async function startServer() {
   const app = express();
   const server = http.createServer(app);
   const io = new Server(server);
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  app.use(express.json({ limit: '5mb' }));
+  app.use(express.urlencoded({ limit: '5mb', extended: true }));
 
-  io.on("connection", (socket) => {
-    console.log("Client connected to socket");
+  // Les notifications temps réel contiennent des données clients :
+  // seul un admin authentifié peut se connecter au socket.
+  io.use((socket, next) => {
+    if (isValidAdminToken(socket.handshake.auth?.token)) return next();
+    next(new Error("Non autorisé"));
+  });
+
+  io.on("connection", () => {
+    console.log("Admin connecté au socket");
   });
 
   // Request logging
@@ -166,23 +268,44 @@ async function startServer() {
     res.json({ status: "ok", time: new Date().toISOString() });
   });
 
+  // --- Authentification admin ---
+  app.post("/api/admin/login", rateLimit("login", 5, 15 * 60 * 1000), (req, res) => {
+    const { password } = req.body ?? {};
+    const stored = db.prepare("SELECT value FROM settings WHERE key = 'admin_password'").get() as { value: string } | undefined;
+    if (typeof password !== "string" || !verifyPassword(password, stored?.value)) {
+      return res.status(401).json({ error: "Mot de passe incorrect" });
+    }
+    res.json({ token: createAdminToken() });
+  });
+
+  app.post("/api/admin/logout", (req, res) => {
+    const token = bearerToken(req.headers.authorization);
+    if (token) adminTokens.delete(token);
+    res.json({ success: true });
+  });
+
+  // Permet au front de vérifier qu'un token stocké est encore valide.
+  app.get("/api/admin/me", requireAdmin, (req, res) => {
+    res.json({ ok: true });
+  });
+
   app.get("/api/services", (req, res) => {
     const services = db.prepare("SELECT * FROM services").all();
     res.json(services);
   });
 
-  app.post("/api/services", (req, res) => {
+  app.post("/api/services", requireAdmin, (req, res) => {
     const services = req.body as any[];
     if (!Array.isArray(services)) return res.status(400).json({ error: "Invalid data" });
 
     try {
       const deleteStmt = db.prepare("DELETE FROM services");
-      const insertStmt = db.prepare("INSERT INTO services (id, name, price, duration, category_id) VALUES (?, ?, ?, ?, ?)");
-      
+      const insertStmt = db.prepare("INSERT INTO services (id, name, price, duration, category_id, description) VALUES (?, ?, ?, ?, ?, ?)");
+
       const transaction = db.transaction((data) => {
         deleteStmt.run();
         for (const s of data) {
-          insertStmt.run(s.id || Math.random().toString(36).substr(2, 9), s.name, s.price, s.duration, s.category_id);
+          insertStmt.run(s.id || Math.random().toString(36).substr(2, 9), s.name, s.price, s.duration, s.category_id, s.description || null);
         }
       });
 
@@ -199,7 +322,7 @@ async function startServer() {
     res.json(categories);
   });
 
-  app.post("/api/categories", (req, res) => {
+  app.post("/api/categories", requireAdmin, (req, res) => {
     const categories = req.body as any[];
     if (!Array.isArray(categories)) return res.status(400).json({ error: "Invalid data" });
 
@@ -223,7 +346,8 @@ async function startServer() {
     }
   });
 
-  app.get("/api/bookings", (req, res) => {
+  // Données clients : réservé à l'admin.
+  app.get("/api/bookings", requireAdmin, (req, res) => {
     const date = req.query.date as string;
     if (!date) return res.status(400).json({ error: "Date is required" });
     
@@ -231,9 +355,33 @@ async function startServer() {
     res.json(bookings);
   });
 
-  app.post("/api/bookings", async (req, res) => {
+  app.post("/api/bookings", rateLimit("booking", 5, 10 * 60 * 1000), async (req, res) => {
     try {
-    const { customer_name, customer_email, service_type, start_time, end_time } = req.body;
+    const { customer_name, customer_email, customer_phone, service_type, start_time, end_time } = req.body;
+
+    // Validation serveur (le front valide déjà, mais l'API est publique).
+    const isStr = (v: unknown, max: number) => typeof v === "string" && v.trim().length > 0 && v.length <= max;
+    if (!isStr(customer_name, 100) || !isStr(service_type, 100)) {
+      return res.status(400).json({ error: "Nom ou prestation invalide." });
+    }
+    if (!isStr(customer_email, 254) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer_email)) {
+      return res.status(400).json({ error: "Adresse e-mail invalide." });
+    }
+    if (customer_phone !== undefined && customer_phone !== null && (typeof customer_phone !== "string" || customer_phone.length > 30)) {
+      return res.status(400).json({ error: "Numéro de téléphone invalide." });
+    }
+    const startDate = new Date(start_time);
+    const endDate = new Date(end_time);
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime()) || endDate <= startDate) {
+      return res.status(400).json({ error: "Créneau invalide." });
+    }
+    if (endDate.getTime() - startDate.getTime() > 8 * 60 * 60 * 1000) {
+      return res.status(400).json({ error: "Durée de créneau invalide." });
+    }
+    if (startDate.getTime() < Date.now() - 60 * 60 * 1000) {
+      return res.status(400).json({ error: "Ce créneau est déjà passé." });
+    }
+
     const googleAccessToken = await getGoogleAccessToken();
     
     // 1. Local availability check (Safety net)
@@ -254,10 +402,10 @@ async function startServer() {
 
     // 3. Save locally (Always, as a backup)
     const stmt = db.prepare(`
-      INSERT INTO bookings (customer_name, customer_email, service_type, start_time, end_time, google_event_id)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO bookings (customer_name, customer_email, customer_phone, service_type, start_time, end_time, google_event_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
-    const result = stmt.run(customer_name, customer_email, service_type, start_time, end_time, googleEventId);
+    const result = stmt.run(customer_name, customer_email, customer_phone || null, service_type, start_time, end_time, googleEventId);
     const localId = result.lastInsertRowid;
 
     // 4. Send Confirmation Email & Webhook (Non-blocking)
@@ -277,24 +425,29 @@ async function startServer() {
         // 1. Email to Customer (if Resend is configured)
         if (resend) {
           try {
+            const svc = db.prepare("SELECT description FROM services WHERE name = ?").get(service_type) as { description?: string } | undefined;
+            const descLine = svc?.description
+              ? `<p style="margin: 5px 0; color:#6E6A63;">${svc.description}</p>`
+              : '';
             await resend.emails.send({
               from: 'Chez Tom <onboarding@resend.dev>',
               to: customer_email,
               subject: 'Confirmation de votre rendez-vous - Chez Tom',
               html: `
-                <div style="font-family: serif; color: #121212; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
-                  <h1 style="text-align: center; color: #C5A059;">Chez Tom</h1>
+                <div style="font-family: Georgia, serif; color: #1A1A1A; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #E2DACB;">
+                  <h1 style="text-align: center; color: #A8884A; letter-spacing: 0.2em; font-weight: 400;">CHEZ TOM</h1>
                   <p>Bonjour <strong>${customer_name}</strong>,</p>
-                  <p>Votre rendez-vous est confirmé ! Nous avons hâte de vous accueillir.</p>
-                  <div style="background-color: #F5F2ED; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                    <p style="margin: 5px 0;"><strong>Service :</strong> ${service_type}</p>
+                  <p>Votre rendez-vous est confirmé. Nous avons hâte de vous accueillir.</p>
+                  <div style="background-color: #F5F1EA; padding: 18px; margin: 20px 0; border-left: 3px solid #C8A968;">
+                    <p style="margin: 5px 0;"><strong>Prestation :</strong> ${service_type}</p>
+                    ${descLine}
                     <p style="margin: 5px 0;"><strong>Date :</strong> ${dateStr}</p>
                     <p style="margin: 5px 0;"><strong>Heure :</strong> ${timeStr}</p>
                   </div>
-                  <p style="font-size: 14px; color: #666;">Adresse : 123 Rue de l'Élégance, 75001 Paris</p>
-                  <p style="font-size: 14px; color: #666;">Téléphone : 01 23 45 67 89</p>
-                  <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
-                  <p style="text-align: center; font-size: 12px; color: #999;">&copy; ${new Date().getFullYear()} Chez Tom. Tous droits réservés.</p>
+                  <p style="font-size: 14px; color: #6E6A63;">Adresse : 123 Rue de l'Élégance, 75001 Paris</p>
+                  <p style="font-size: 14px; color: #6E6A63;">Téléphone : 01 23 45 67 89</p>
+                  <hr style="border: 0; border-top: 1px solid #E2DACB; margin: 20px 0;" />
+                  <p style="text-align: center; font-size: 12px; color: #8A857C;">&copy; ${new Date().getFullYear()} Chez Tom. Tous droits réservés.</p>
                 </div>
               `
             });
@@ -318,6 +471,7 @@ async function startServer() {
             data: {
               customer_name,
               customer_email,
+              customer_phone,
               service_type,
               duration,
               price,
@@ -384,34 +538,46 @@ async function startServer() {
       acc[curr.key] = curr.value;
       return acc;
     }, {});
+    // Jamais de secret côté public.
+    delete settingsMap.admin_password;
     res.json(settingsMap);
   });
 
-  app.post("/api/settings", (req, res) => {
+  app.post("/api/settings", requireAdmin, (req, res) => {
     const { key, value } = req.body;
-    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(key, value.toString());
+    if (typeof key !== "string" || value === undefined || value === null) {
+      return res.status(400).json({ error: "Paramètres invalides" });
+    }
+    let stored = value.toString();
+    if (key === "admin_password") {
+      if (stored.length < 8) {
+        return res.status(400).json({ error: "Le mot de passe doit faire au moins 8 caractères." });
+      }
+      stored = hashPassword(stored);
+    }
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(key, stored);
     res.json({ success: true });
   });
 
   // Notifications API
-  app.get("/api/notifications", (req, res) => {
+  app.get("/api/notifications", requireAdmin, (req, res) => {
     const notifications = db.prepare("SELECT * FROM notifications ORDER BY created_at DESC LIMIT 50").all();
     res.json(notifications);
   });
 
-  app.post("/api/notifications/read-all", (req, res) => {
+  app.post("/api/notifications/read-all", requireAdmin, (req, res) => {
     db.prepare("UPDATE notifications SET is_read = 1").run();
     res.json({ success: true });
   });
 
-  app.post("/api/notifications/:id/read", (req, res) => {
+  app.post("/api/notifications/:id/read", requireAdmin, (req, res) => {
     const { id } = req.params;
     db.prepare("UPDATE notifications SET is_read = 1 WHERE id = ?").run(id);
     res.json({ success: true });
   });
 
   // Fetch Google Calendar List
-  app.get("/api/google/calendars", async (req, res) => {
+  app.get("/api/google/calendars", requireAdmin, async (req, res) => {
     const googleAccessToken = await getGoogleAccessToken();
     if (!googleAccessToken) {
       return res.status(401).json({ error: "Google Calendar non connecté" });
@@ -432,7 +598,7 @@ async function startServer() {
   });
 
   // Fetch Google Calendar Events
-  app.get("/api/google/events", async (req, res) => {
+  app.get("/api/google/events", requireAdmin, async (req, res) => {
     const { start, end } = req.query as { start: string, end: string };
     const googleAccessToken = await getGoogleAccessToken();
     
@@ -490,7 +656,7 @@ async function startServer() {
     res.json([...events, ...formattedLocal]);
   });
 
-  app.post("/api/google/events", async (req, res) => {
+  app.post("/api/google/events", requireAdmin, async (req, res) => {
     const { summary, start, end } = req.body;
     const googleAccessToken = await getGoogleAccessToken();
     
@@ -529,7 +695,7 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/google/events/:id", async (req, res) => {
+  app.delete("/api/google/events/:id", requireAdmin, async (req, res) => {
     const { id } = req.params;
     console.log(`Tentative de suppression de l'événement: ${id}`);
     
@@ -572,7 +738,7 @@ async function startServer() {
   });
 
   // Bulk Sync Local Bookings to Google
-  app.post("/api/google/sync", async (req, res) => {
+  app.post("/api/google/sync", requireAdmin, async (req, res) => {
     const googleAccessToken = await getGoogleAccessToken();
     if (!googleAccessToken) {
       return res.status(401).json({ error: "Google Calendar non connecté" });
@@ -632,13 +798,13 @@ async function startServer() {
   });
 
   // Google OAuth URL Generation
-  app.get("/api/auth/google/url", (req, res) => {
+  app.get("/api/auth/google/url", requireAdmin, (req, res) => {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const appUrl = process.env.APP_URL?.replace(/\/$/, ""); // Remove trailing slash
 
     if (!clientId || !appUrl) {
       return res.status(500).json({ 
-        error: "Configuration manquante. Veuillez configurer GOOGLE_CLIENT_ID et APP_URL dans les Secrets de AI Studio." 
+        error: "Configuration manquante. Renseignez GOOGLE_CLIENT_ID et APP_URL dans le fichier .env."
       });
     }
 
@@ -723,7 +889,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/gallery", (req, res) => {
+  app.post("/api/gallery", requireAdmin, (req, res) => {
     const { url, caption } = req.body;
     if (!url) return res.status(400).json({ error: "URL is required" });
 
@@ -736,7 +902,7 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/gallery/:id", (req, res) => {
+  app.delete("/api/gallery/:id", requireAdmin, (req, res) => {
     const { id } = req.params;
     try {
       db.prepare("DELETE FROM gallery WHERE id = ?").run(id);

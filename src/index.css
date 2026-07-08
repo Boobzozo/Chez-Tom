@@ -1,13 +1,26 @@
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&family=Inter:wght@100;200;300;400;500;600;700;800;900&display=swap');
+/* Les polices Google sont chargées depuis index.html (preconnect + link). */
 @import "tailwindcss";
 
 @theme {
   --font-serif: "Cormorant Garamond", serif;
   --font-sans: "Inter", sans-serif;
-  
-  --color-gold: #C5A059;
-  --color-dark: #121212;
-  --color-paper: #F5F2ED;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Palette raffinée (audit UX — mai 2026) */
+  --color-gold: #C8A968;
+  --color-gold-deep: #A8884A;
+  --color-dark: #0E0E0E;       /* "ink" */
+  --color-ink-soft: #1A1A1A;
+  --color-paper: #F5F1EA;      /* "cream" */
+  --color-cream-deep: #EDE6DA;
+  --color-hairline: #E2DACB;
+  --color-muted: #8A857C;
+  --color-muted-deep: #6E6A63;
+
+  /* Rayons tranchés — univers barbier traditionnel, pas de pilule */
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 4px;
 }
 
 @utility no-scrollbar {
@@ -33,15 +46,65 @@
 }
 
 .glass-card {
-  @apply bg-white/80 backdrop-blur-md border border-white/20 shadow-xl;
+  @apply bg-white border border-hairline shadow-sm;
+  border-radius: var(--radius-md);
 }
 
+/* Label utilitaire monospace (numéros d'étape, codes) */
+.mono-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+/* CTA principal — toujours noir, jamais un gris ambigu.
+   Désactivé = même bouton à 30% d'opacité. Coins tranchés, pas de pilule. */
 .btn-primary {
-  @apply bg-dark text-paper px-8 py-3 rounded-full hover:bg-gold hover:text-dark transition-all duration-500 ease-out font-medium uppercase tracking-widest text-xs hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0;
+  @apply inline-flex items-center justify-center gap-3.5 bg-dark text-white px-9 py-4 font-semibold uppercase text-[11px] transition-colors duration-300;
+  border-radius: 0;
+  letter-spacing: 0.24em;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--color-ink-soft);
+}
+.btn-primary:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 .btn-outline {
-  @apply border border-dark/20 px-8 py-3 rounded-full hover:border-dark transition-all duration-500 ease-out font-medium uppercase tracking-widest text-xs hover:bg-dark/5 hover:-translate-y-0.5 active:translate-y-0;
+  @apply inline-flex items-center justify-center gap-3 border border-hairline text-ink-soft px-9 py-4 font-semibold uppercase text-[11px] transition-colors duration-300 hover:border-dark;
+  border-radius: 0;
+  letter-spacing: 0.24em;
+}
+
+/* Bouton texte discret (retour) */
+.btn-ghost {
+  @apply inline-flex items-center gap-3 text-muted-deep font-semibold uppercase text-[11px] transition-colors hover:text-dark;
+  letter-spacing: 0.24em;
+}
+
+/* Focus clavier visible sur tous les éléments interactifs du tunnel */
+#booking button:focus-visible,
+#booking a:focus-visible,
+#booking input:focus-visible,
+#booking [tabindex]:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+/* Respect de prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* FullCalendar Customization */
@@ -172,30 +235,32 @@
 .admin-calendar .fc-button-primary:not(:disabled).fc-button-active,
 .admin-calendar .fc-button-primary:not(:disabled):active {
   @apply bg-dark text-paper border-dark;
-  background-color: #121212 !important;
-  color: #F5F2ED !important;
-  border-color: #121212 !important;
+  background-color: #0E0E0E !important;
+  color: #F5F1EA !important;
+  border-color: #0E0E0E !important;
 }
 
-/* Slot selection styles */
+/* Créneaux — coins tranchés, sélection en noir plein */
 .slot-btn {
-  @apply py-3 rounded-xl text-sm transition-all duration-300 border-2 border-gold bg-transparent text-gold cursor-pointer font-serif;
+  @apply py-3 text-sm transition-colors duration-150 border border-hairline bg-white text-ink-soft cursor-pointer font-medium;
+  border-radius: var(--radius-xs);
 }
 
 .slot-btn:hover {
-  @apply bg-gold text-dark;
+  @apply border-dark;
 }
 
 .slot-btn.selected {
-  @apply bg-gold text-dark font-bold shadow-md;
+  @apply bg-dark text-white border-dark font-medium;
 }
 
 .slots-placeholder {
-  @apply text-dark/40 italic text-sm py-8 text-center bg-dark/5 rounded-2xl w-full;
+  @apply text-muted-deep text-sm py-8 text-center bg-white border border-hairline w-full;
+  border-radius: var(--radius-md);
 }
 
 .slots-loading {
-  @apply text-gold animate-pulse text-center py-8 w-full;
+  @apply text-muted-deep animate-pulse text-center py-8 w-full;
 }
 
 /* Mobile Calendar Adjustments */

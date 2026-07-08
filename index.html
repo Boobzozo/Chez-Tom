@@ -3,35 +3,49 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Chez Tom - Barbier & Coiffeur | Réservation en ligne</title>
-    <meta name="description" content="Barbier et coiffeur à Paris. Prenez rendez-vous en ligne chez Chez Tom pour vos coupes de cheveux et soins de barbe. Un service de qualité dans une ambiance authentique." />
-    <meta name="keywords" content="barbier, coiffeur, Paris, réservation en ligne, coupe homme, barbe, Chez Tom" />
-    <link rel="canonical" href="https://ais-dev-womnkqox325iap2mlnayj5-478493383507.europe-west2.run.app/" />
-    
+
+    <!-- ⚠️ AVANT MISE EN LIGNE : remplacer https://chez-tom.fr par votre vrai domaine
+         (ici, dans public/robots.txt et dans public/sitemap.xml). Voir README.md. -->
+
+    <title>Chez Tom — Barbier & Coiffeur à Paris | Réservation en ligne</title>
+    <meta name="description" content="Salon de barbier et coiffeur à Paris. Coupe, taille de barbe au rasoir traditionnel, rituel signature. Réservez votre créneau en ligne en moins d'une minute." />
+    <link rel="canonical" href="https://chez-tom.fr/" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="theme-color" content="#0E0E0E" />
+
+    <!-- Polices : preconnect + chargement direct (plus rapide qu'un @import CSS) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://ais-dev-womnkqox325iap2mlnayj5-478493383507.europe-west2.run.app/" />
-    <meta property="og:title" content="Chez Tom - Barbier & Coiffeur | Réservation en ligne" />
-    <meta property="og:description" content="Barbier et coiffeur à Paris. Prenez rendez-vous en ligne chez Chez Tom pour vos coupes de cheveux et soins de barbe." />
-    <meta property="og:image" content="https://picsum.photos/seed/barber/1200/630" />
+    <meta property="og:locale" content="fr_FR" />
+    <meta property="og:url" content="https://chez-tom.fr/" />
+    <meta property="og:site_name" content="Chez Tom" />
+    <meta property="og:title" content="Chez Tom — Barbier & Coiffeur | Réservation en ligne" />
+    <meta property="og:description" content="Coupe, barbe au rasoir traditionnel, rituel signature. Réservez votre créneau en ligne." />
+    <meta property="og:image" content="https://images.unsplash.com/photo-1503951914875-452162b0f3f1?auto=format&fit=crop&q=80&w=1200&h=630" />
 
     <!-- Twitter -->
-    <meta property="twitter:card" content="summary_large_image" />
-    <meta property="twitter:url" content="https://ais-dev-womnkqox325iap2mlnayj5-478493383507.europe-west2.run.app/" />
-    <meta property="twitter:title" content="Chez Tom - Barbier & Coiffeur | Réservation en ligne" />
-    <meta property="twitter:description" content="Barbier et coiffeur à Paris. Prenez rendez-vous en ligne chez Chez Tom pour vos coupes de cheveux et soins de barbe." />
-    <meta property="twitter:image" content="https://picsum.photos/seed/barber/1200/630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Chez Tom — Barbier & Coiffeur | Réservation en ligne" />
+    <meta name="twitter:description" content="Coupe, barbe au rasoir traditionnel, rituel signature. Réservez votre créneau en ligne." />
+    <meta name="twitter:image" content="https://images.unsplash.com/photo-1503951914875-452162b0f3f1?auto=format&fit=crop&q=80&w=1200&h=630" />
 
-    <!-- Structured Data (JSON-LD) -->
+    <!-- Données structurées (référencement local Google) -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@type": "BarberShop",
+        "@id": "https://chez-tom.fr/#salon",
         "name": "Chez Tom",
-        "image": "https://picsum.photos/seed/barber/800/600",
-        "@id": "",
-        "url": "https://ais-dev-womnkqox325iap2mlnayj5-478493383507.europe-west2.run.app/",
-        "telephone": "01 23 45 67 89",
+        "description": "Salon de barbier et coiffeur à Paris. Coupe, taille de barbe au rasoir traditionnel, rituel signature.",
+        "url": "https://chez-tom.fr/",
+        "image": "https://images.unsplash.com/photo-1503951914875-452162b0f3f1?auto=format&fit=crop&q=80&w=1200",
+        "telephone": "+33123456789",
+        "priceRange": "€€",
         "address": {
           "@type": "PostalAddress",
           "streetAddress": "123 Rue de l'Élégance",
@@ -42,13 +56,7 @@
         "openingHoursSpecification": [
           {
             "@type": "OpeningHoursSpecification",
-            "dayOfWeek": [
-              "Monday",
-              "Tuesday",
-              "Wednesday",
-              "Thursday",
-              "Friday"
-            ],
+            "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
             "opens": "09:00",
             "closes": "19:00"
           },
@@ -59,7 +67,17 @@
             "closes": "18:00"
           }
         ],
-        "acceptsReservations": "True"
+        "acceptsReservations": "True",
+        "potentialAction": {
+          "@type": "ReserveAction",
+          "target": {
+            "@type": "EntryPoint",
+            "urlTemplate": "https://chez-tom.fr/#booking",
+            "inLanguage": "fr",
+            "actionPlatform": ["http://schema.org/DesktopWebPlatform", "http://schema.org/MobileWebPlatform"]
+          },
+          "result": { "@type": "Reservation", "name": "Réservation d'un créneau" }
+        }
       }
     </script>
   </head>
@@ -68,4 +86,3 @@
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-
