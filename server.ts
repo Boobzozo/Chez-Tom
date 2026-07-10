@@ -465,31 +465,40 @@ async function startServer() {
           }
         }
 
-        // 2. Webhook for n8n (Always try)
+        // 2. Webhooks n8n (non bloquants)
         const webhookUrl = "https://n8n.srv1043923.hstgr.cloud/webhook/reservation-chez-tom";
+        const telegramNotifyUrl = "https://n8n.srv1043923.hstgr.cloud/webhook/notification-telegram";
         let reservationId = `TOM-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 10000)}`;
-        
+
         // Fetch service details
         const service = db.prepare("SELECT duration, price FROM services WHERE name = ?").get(service_type) as { duration: number, price: number } | undefined;
         const duration = service?.duration || 30;
         const price = service?.price || 0;
 
+        const webhookPayload = {
+          event: 'booking.created',
+          data: {
+            customer_name,
+            customer_email,
+            customer_phone,
+            service_type,
+            duration,
+            price,
+            start_time,
+            end_time,
+            formatted_date: dateStr,
+            formatted_time: timeStr
+          }
+        };
+
+        // Notification Telegram du gérant — fire-and-forget :
+        // tant que le workflow n8n est inactif, l'appel échoue silencieusement.
+        axios.post(telegramNotifyUrl, webhookPayload, { timeout: 5000 }).catch((err) => {
+          console.log(`Notification Telegram non délivrée (workflow inactif ?): ${err.response?.status || err.message}`);
+        });
+
         try {
-          const webhookResponse = await axios.post(webhookUrl, {
-            event: 'booking.created',
-            data: {
-              customer_name,
-              customer_email,
-              customer_phone,
-              service_type,
-              duration,
-              price,
-              start_time,
-              end_time,
-              formatted_date: dateStr,
-              formatted_time: timeStr
-            }
-          });
+          const webhookResponse = await axios.post(webhookUrl, webhookPayload);
 
           if (webhookResponse.data && webhookResponse.data.success) {
             if (webhookResponse.data.reservation_id) reservationId = webhookResponse.data.reservation_id;

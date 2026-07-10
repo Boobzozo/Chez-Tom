@@ -66,6 +66,7 @@ Visiteur → tunnel de réservation (4 étapes, src/booking/)
   confirmation   → POST /api/bookings (validé + limité côté serveur)
        ├─ enregistrement SQLite (source de vérité)
        ├─ email Resend (si RESEND_API_KEY)
+       ├─ webhook n8n « notification-telegram » (facultatif) → alerte Telegram au gérant 📲
        └─ webhook n8n « reservation-chez-tom » (facultatif) → Google Agenda + Google Sheets + email Gmail
 ```
 
