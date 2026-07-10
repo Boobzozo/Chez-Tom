@@ -571,8 +571,10 @@ const AdminDashboard = ({
     try {
       const start = `${newUnavailability.date}T${newUnavailability.startTime}:00`;
       const end = `${newUnavailability.date}T${newUnavailability.endTime}:00`;
-      
-      const res = await adminFetch('/api/google/events', {
+
+      // Indisponibilité locale (bloque immédiatement les créneaux du site) ;
+      // le serveur la miroite sur Google Calendar si un compte est lié.
+      const res = await adminFetch('/api/blocks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -719,7 +721,7 @@ const AdminDashboard = ({
                 <span className="text-sm">Afficher "Galerie"</span>
                 <button 
                   onClick={() => updateSetting('show_gallery', settings?.show_gallery === 'true' ? 'false' : 'true')}
-                  className={`w-12 h-6 rounded-full transition-colors relative ${settings?.show_gallery === 'true' ? 'bg-emerald-500' : 'bg-dark/10'}`}
+                  className={`w-12 h-6 rounded-full transition-colors relative ${settings?.show_gallery === 'true' ? 'bg-dark' : 'bg-dark/10'}`}
                 >
                   <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings?.show_gallery === 'true' ? 'left-7' : 'left-1'}`}></div>
                 </button>
@@ -729,7 +731,7 @@ const AdminDashboard = ({
                 <span className="text-sm">Afficher "À propos"</span>
                 <button 
                   onClick={() => updateSetting('show_about', settings?.show_about === 'true' ? 'false' : 'true')}
-                  className={`w-12 h-6 rounded-full transition-colors relative ${settings?.show_about === 'true' ? 'bg-emerald-500' : 'bg-dark/10'}`}
+                  className={`w-12 h-6 rounded-full transition-colors relative ${settings?.show_about === 'true' ? 'bg-dark' : 'bg-dark/10'}`}
                 >
                   <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings?.show_about === 'true' ? 'left-7' : 'left-1'}`}></div>
                 </button>
@@ -757,30 +759,36 @@ const AdminDashboard = ({
                   </button>
                 </div>
                 {passwordMsg && (
-                  <p className={`text-xs ${passwordMsg.ok ? 'text-emerald-600' : 'text-red-500'}`}>{passwordMsg.text}</p>
+                  <p className={`text-xs ${passwordMsg.ok ? 'text-gold-deep' : 'text-red-500'}`}>{passwordMsg.text}</p>
                 )}
               </div>
 
               <div className="pt-6 border-t border-dark/5 space-y-3">
                 {calendars.length === 0 ? (
-                  <button 
-                    onClick={connectGoogle}
-                    className="w-full flex items-center justify-center gap-2 border py-3 rounded-[3px] bg-white border-dark/10 hover:bg-dark/5 transition-colors text-sm font-medium"
-                  >
-                    <img src="https://www.google.com/favicon.ico" className="w-4 h-4" alt="Google" />
-                    Lier Google Calendar
-                  </button>
+                  <>
+                    <button
+                      onClick={connectGoogle}
+                      className="w-full flex items-center justify-center gap-2 border py-3 rounded-[3px] bg-white border-dark/10 hover:bg-dark/5 transition-colors text-sm font-medium"
+                    >
+                      <img src="https://www.google.com/favicon.ico" className="w-4 h-4" alt="Google" />
+                      Lier Google Calendar
+                    </button>
+                    <p className="text-[10px] text-muted-deep leading-tight">
+                      Facultatif — le planning et les réservations fonctionnent sans compte Google.
+                      La liaison ajoute simplement une copie de vos rendez-vous dans votre agenda.
+                    </p>
+                  </>
                 ) : (
-                  <div className="bg-emerald-50 border border-emerald-100 rounded-[3px] p-4">
-                    <div className="flex items-center gap-2 text-emerald-700 font-bold text-xs mb-1">
+                  <div className="bg-paper border border-hairline rounded-[3px] p-4">
+                    <div className="flex items-center gap-2 text-gold-deep font-bold text-xs mb-1">
                       <Check size={14} /> Google Calendar Connecté
                     </div>
-                    <p className="text-[10px] text-emerald-600/70 leading-tight">
+                    <p className="text-[10px] text-muted-deep leading-tight">
                       La synchronisation est automatique via votre pont n8n.
                     </p>
                     <button 
                       onClick={connectGoogle}
-                      className="mt-3 text-[10px] uppercase tracking-widest font-bold text-emerald-700/50 hover:text-emerald-700 transition-colors"
+                      className="mt-3 text-[10px] uppercase tracking-widest font-bold text-muted-deep hover:text-dark transition-colors"
                     >
                       Changer de compte
                     </button>
@@ -819,12 +827,12 @@ const AdminDashboard = ({
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold uppercase tracking-widest">{dayLabels[day]}</span>
                     <div className="flex items-center gap-3">
-                      <span className={`text-[10px] uppercase tracking-widest font-bold ${openingHours[day]?.closed ? 'text-red-500' : 'text-emerald-500'}`}>
+                      <span className={`text-[10px] uppercase tracking-widest font-bold ${openingHours[day]?.closed ? 'text-red-500' : 'text-gold-deep'}`}>
                         {openingHours[day]?.closed ? 'Fermé' : 'Ouvert'}
                       </span>
                       <button 
                         onClick={() => updateOpeningHours(day, 'closed', !openingHours[day]?.closed)}
-                        className={`w-10 h-5 rounded-full transition-all relative hover:shadow-sm ${!openingHours[day]?.closed ? 'bg-emerald-500' : 'bg-dark/10'}`}
+                        className={`w-10 h-5 rounded-full transition-all relative hover:shadow-sm ${!openingHours[day]?.closed ? 'bg-dark' : 'bg-dark/10'}`}
                       >
                         <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${!openingHours[day]?.closed ? 'left-6' : 'left-1'}`}></div>
                       </button>

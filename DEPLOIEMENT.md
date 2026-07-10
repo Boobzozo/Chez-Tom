@@ -88,19 +88,20 @@ sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d votre-domaine.fr -d www.votre-domaine.fr   # HTTPS automatique
 ```
 
-## 5. n8n (créneaux + confirmations)
+## 5. n8n (facultatif — notifications & agenda)
 
-Le site s'appuie sur deux workflows n8n :
+Les créneaux sont calculés **par le site lui-même** (aucune dépendance externe).
+n8n ne sert plus qu'aux à-côtés après réservation :
 
 | Webhook | Rôle | Appelé depuis |
 |---|---|---|
-| `check-availability` | renvoie les créneaux libres `{ "slots": ["09h00", …] }` | `src/booking/useAvailability.ts` |
 | `reservation-chez-tom` | Google Agenda + Google Sheets + email de confirmation | `server.ts` |
 
-Sur votre instance n8n : recréer/importer ces workflows, **activer**-les, puis
-remplacer les deux URLs dans les fichiers ci-dessus par les vôtres.
-Le payload de réservation transmet notamment `customer_name`, `customer_email`,
+Si vous l'utilisez : recréez le workflow sur votre instance, **activez**-le, et remplacez
+l'URL dans `server.ts`. Le payload transmet notamment `customer_name`, `customer_email`,
 `customer_phone`, `service_type`, `duration`, `price`, `start_time`, `end_time`.
+Sans compte Google, remplacez le nœud Gmail par un nœud SMTP (email) et supprimez
+les nœuds Google Agenda/Sheets — ou n'utilisez pas n8n du tout.
 
 ## 6. Après la mise en ligne
 

@@ -118,8 +118,8 @@
   --fc-button-hover-border-color: rgba(0, 0, 0, 0.2);
   --fc-button-active-bg-color: #1a1a1a;
   --fc-button-active-border-color: #1a1a1a;
-  --fc-today-bg-color: rgba(197, 160, 89, 0.03);
-  --fc-event-bg-color: #e0f2fe;
+  --fc-today-bg-color: rgba(200, 169, 104, 0.06);
+  --fc-event-bg-color: #EDE6DA;
   --fc-event-border-color: transparent;
   --fc-event-text-color: #1a1a1a;
   background: #ffffff;
@@ -131,7 +131,7 @@
 
 .admin-calendar .fc-event {
   @apply shadow-sm;
-  border-radius: 8px !important;
+  border-radius: 3px !important;
   padding: 4px 8px !important;
   border: 1px solid rgba(0, 0, 0, 0.05) !important;
   cursor: pointer;
@@ -146,25 +146,25 @@
   z-index: 50 !important;
 }
 
-/* Pastel variants for different event types */
+/* Types d'événements — palette de la charte */
 .admin-calendar .event-coupe {
-  background-color: #f0f9ff !important; /* Pastel Bleu */
-  border-left: 4px solid #0ea5e9 !important;
+  background-color: #F5F1EA !important; /* crème */
+  border-left: 3px solid #C8A968 !important; /* or */
 }
 
 .admin-calendar .event-coupe-barbe {
-  background-color: #f0fdf4 !important; /* Pastel Vert */
-  border-left: 4px solid #22c55e !important;
+  background-color: #EDE6DA !important; /* crème profond */
+  border-left: 3px solid #0E0E0E !important; /* ink */
 }
 
 .admin-calendar .event-unavailability {
-  background-color: #fef2f2 !important; /* Pastel Rouge */
-  border-left: 4px solid #ef4444 !important;
+  background-color: #F7EAE7 !important; /* rouge très pâle */
+  border-left: 3px solid #B23A2B !important;
 }
 
 .admin-calendar .event-booking {
-  background-color: #f8fafc !important; /* Par défaut gris très clair */
-  border-left: 4px solid #94a3b8 !important;
+  background-color: #FFFFFF !important;
+  border-left: 3px solid #8A857C !important; /* muted */
 }
 
 .admin-calendar .event-local-only {

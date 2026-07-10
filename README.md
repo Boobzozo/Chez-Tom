@@ -56,17 +56,25 @@ Copier `.env.example` en `.env`. Tout est **facultatif** pour tester en local :
 
 ## Réservation : comment ça circule
 
+**Le planning fonctionne à 100 % en local** — aucun compte Google ni n8n requis.
+La base SQLite est la source de vérité : le serveur calcule lui-même les créneaux libres
+(horaires d'ouverture − réservations confirmées − indisponibilités).
+
 ```
 Visiteur → tunnel de réservation (4 étapes, src/booking/)
-  étape créneau  → POST webhook n8n « check-availability » (créneaux réellement libres)
+  étape créneau  → GET /api/availability (calcul local, instantané)
   confirmation   → POST /api/bookings (validé + limité côté serveur)
-       ├─ enregistrement SQLite (toujours)
+       ├─ enregistrement SQLite (source de vérité)
        ├─ email Resend (si RESEND_API_KEY)
-       └─ webhook n8n « reservation-chez-tom » → Google Agenda + Google Sheets + email Gmail
+       └─ webhook n8n « reservation-chez-tom » (facultatif) → Google Agenda + Google Sheets + email Gmail
 ```
 
-Les URLs des webhooks n8n sont dans `src/booking/useAvailability.ts` (front)
-et `server.ts` (back) — **à remplacer par les vôtres**.
+Les indisponibilités posées dans l'espace gérant bloquent immédiatement les créneaux ;
+si un compte Google est lié, elles sont aussi recopiées dans l'agenda (miroir, jamais bloquant).
+
+L'URL du webhook n8n est dans `server.ts` — à remplacer par la vôtre, ou à ignorer
+si vous n'utilisez pas n8n. **Pour un gérant sans compte Google** : tout fonctionne ;
+adaptez seulement le workflow n8n (nœud Gmail → SMTP) si vous voulez l'email de confirmation par n8n.
 
 ## Avant la mise en ligne — checklist
 

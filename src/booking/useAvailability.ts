@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Service, DayHours } from '../types';
 
-const CHECK_AVAILABILITY_URL = 'https://n8n.srv1043923.hstgr.cloud/webhook/check-availability';
-
 const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
 export const getDayOfWeek = (dateStr: string) => {
@@ -29,8 +27,9 @@ interface UseAvailabilityResult {
 }
 
 /**
- * Récupère les créneaux disponibles auprès du webhook n8n, en tenant compte
- * des horaires du salon (state SQLite) et en filtrant les créneaux passés.
+ * Récupère les créneaux disponibles auprès du serveur du site
+ * (calcul local : horaires d'ouverture − réservations − indisponibilités),
+ * puis filtre les créneaux déjà passés.
  */
 export function useAvailability(
   date: string,
@@ -44,9 +43,8 @@ export function useAvailability(
   const fetchSlots = useCallback(async () => {
     if (!date || !service) return;
 
-    const dayOfWeek = getDayOfWeek(date);
-    const hours = openingHours[dayOfWeek];
-
+    // Jour fermé : inutile d'appeler le serveur.
+    const hours = openingHours[getDayOfWeek(date)];
     if (!hours || hours.closed) {
       setRawSlots([]);
       setError(null);
@@ -56,46 +54,19 @@ export function useAvailability(
     setLoading(true);
     setError(null);
 
-    const payload = {
-      date,
-      day_of_week: dayOfWeek,
-      service_duration: service.duration,
-      opening: hours.open || '09:00',
-      closing: hours.close || '19:00',
-      has_break: !!hours.has_break,
-      break_start: hours.break_start || '12:00',
-      break_end: hours.break_end || '14:00',
-    };
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-
     try {
-      const res = await fetch(CHECK_AVAILABILITY_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-
+      const res = await fetch(`/api/availability?date=${date}&duration=${service.duration}`);
       if (res.ok) {
         const data = await res.json();
-        const slots = (data.slots || []).map((s: string) => s.replace('h', ':'));
-        setRawSlots(slots);
+        setRawSlots(data.slots || []);
       } else {
         setRawSlots([]);
         setError('Impossible de récupérer les créneaux disponibles.');
       }
-    } catch (err: any) {
-      clearTimeout(timeoutId);
+    } catch (err) {
+      console.error('Error fetching available slots:', err);
       setRawSlots([]);
-      if (err.name === 'AbortError') {
-        setError('Le service de disponibilité ne répond pas (délai de 5s dépassé).');
-      } else {
-        console.error('Error fetching available slots:', err);
-        setError('Erreur lors de la connexion au service de disponibilité.');
-      }
+      setError('Erreur de connexion au serveur.');
     } finally {
       setLoading(false);
     }

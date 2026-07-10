@@ -82,6 +82,15 @@ db.exec(`
     caption TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS blocks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    summary TEXT NOT NULL DEFAULT 'Indisponibilité',
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
+    google_event_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // Seed default categories and services if empty
@@ -532,6 +541,112 @@ async function startServer() {
     }
   });
 
+  // --- Disponibilité (source de vérité : SQLite, pas de dépendance Google/n8n) ---
+  app.get("/api/availability", (req, res) => {
+    const date = String(req.query.date || "");
+    const duration = Number(req.query.duration);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(duration) || duration <= 0 || duration > 480) {
+      return res.status(400).json({ error: "Paramètres invalides" });
+    }
+
+    const hoursRow = db.prepare("SELECT value FROM settings WHERE key = 'opening_hours'").get() as { value: string } | undefined;
+    let openingHours: Record<string, any> = {};
+    try { openingHours = hoursRow ? JSON.parse(hoursRow.value) : {}; } catch { /* horaires illisibles → jour fermé */ }
+
+    const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+    const [y, m, d] = date.split("-").map(Number);
+    const hours = openingHours[dayNames[new Date(y, m - 1, d).getDay()]];
+    if (!hours || hours.closed) return res.json({ slots: [] });
+
+    const toMin = (t: string) => { const [h, mn] = t.split(":").map(Number); return h * 60 + mn; };
+    const open = toMin(hours.open || "09:00");
+    const close = toMin(hours.close || "19:00");
+    const breakStart = hours.has_break ? toMin(hours.break_start || "12:00") : null;
+    const breakEnd = hours.has_break ? toMin(hours.break_end || "14:00") : null;
+
+    // Plages occupées du jour : réservations confirmées + indisponibilités.
+    const busy: Array<{ s: number; e: number }> = [];
+    const dayStart = `${date}T00:00:00`;
+    const dayEnd = `${date}T23:59:59`;
+    const rows = [
+      ...db.prepare("SELECT start_time, end_time FROM bookings WHERE status = 'confirmed' AND start_time < ? AND end_time > ?").all(dayEnd, dayStart) as any[],
+      ...db.prepare("SELECT start_time, end_time FROM blocks WHERE start_time < ? AND end_time > ?").all(dayEnd, dayStart) as any[],
+    ];
+    for (const r of rows) {
+      const s = new Date(r.start_time); const e = new Date(r.end_time);
+      const sMin = r.start_time.startsWith(date) ? s.getHours() * 60 + s.getMinutes() : 0;
+      const eMin = r.end_time.startsWith(date) ? e.getHours() * 60 + e.getMinutes() : 24 * 60;
+      busy.push({ s: sMin, e: eMin });
+    }
+
+    const slots: string[] = [];
+    for (let t = open; t + duration <= close; t += 30) {
+      const tEnd = t + duration;
+      if (breakStart !== null && breakEnd !== null && t < breakEnd && tEnd > breakStart) continue;
+      if (busy.some((b) => t < b.e && tEnd > b.s)) continue;
+      slots.push(`${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`);
+    }
+    res.json({ slots });
+  });
+
+  // --- Indisponibilités (locales ; miroir Google optionnel, non bloquant) ---
+  app.post("/api/blocks", requireAdmin, async (req, res) => {
+    const { summary, start, end } = req.body ?? {};
+    const s = new Date(start); const e = new Date(end);
+    if (isNaN(s.getTime()) || isNaN(e.getTime()) || e <= s) {
+      return res.status(400).json({ error: "Plage horaire invalide" });
+    }
+    const label = typeof summary === "string" && summary.trim() ? summary.trim().slice(0, 100) : "Indisponibilité";
+    const info = db.prepare("INSERT INTO blocks (summary, start_time, end_time) VALUES (?, ?, ?)").run(label, start, end);
+    const blockId = info.lastInsertRowid;
+
+    // Miroir Google, si connecté — l'échec n'empêche pas l'indisponibilité locale.
+    try {
+      const token = await getGoogleAccessToken();
+      if (token) {
+        const calSetting = db.prepare("SELECT value FROM settings WHERE key = 'google_calendar_id'").get() as { value: string } | undefined;
+        const calendarId = (calSetting?.value || "primary").trim();
+        const response = await axios.post(
+          `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+          {
+            summary: label,
+            start: { dateTime: start.split(".")[0].replace("Z", ""), timeZone: "Europe/Paris" },
+            end: { dateTime: end.split(".")[0].replace("Z", ""), timeZone: "Europe/Paris" },
+          },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        db.prepare("UPDATE blocks SET google_event_id = ? WHERE id = ?").run(response.data.id, blockId);
+      }
+    } catch (err: any) {
+      console.error("Miroir Google de l'indisponibilité impossible:", err.response?.data || err.message);
+    }
+
+    res.status(201).json({ id: blockId, summary: label, start_time: start, end_time: end });
+  });
+
+  app.delete("/api/blocks/:id", requireAdmin, async (req, res) => {
+    const block = db.prepare("SELECT * FROM blocks WHERE id = ?").get(req.params.id) as any;
+    if (!block) return res.status(404).json({ error: "Indisponibilité introuvable" });
+    db.prepare("DELETE FROM blocks WHERE id = ?").run(block.id);
+
+    if (block.google_event_id) {
+      try {
+        const token = await getGoogleAccessToken();
+        if (token) {
+          const calSetting = db.prepare("SELECT value FROM settings WHERE key = 'google_calendar_id'").get() as { value: string } | undefined;
+          const calendarId = (calSetting?.value || "primary").trim();
+          await axios.delete(
+            `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(block.google_event_id)}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+        }
+      } catch (err: any) {
+        console.error("Suppression du miroir Google impossible:", err.response?.data || err.message);
+      }
+    }
+    res.json({ success: true });
+  });
+
   app.get("/api/settings", (req, res) => {
     const settings = db.prepare("SELECT * FROM settings").all();
     const settingsMap = settings.reduce((acc: any, curr: any) => {
@@ -653,7 +768,26 @@ async function startServer() {
         isOrphaned: !!b.google_event_id // Mark as orphaned if it had a Google ID but wasn't found
       }));
 
-    res.json([...events, ...formattedLocal]);
+    // 3. Indisponibilités locales (celles déjà miroitées sur Google sont dédupliquées)
+    const localBlocks = db.prepare(`
+      SELECT id, summary, start_time, end_time, google_event_id
+      FROM blocks
+      WHERE start_time >= ? AND start_time <= ?
+    `).all(localStart, localEnd) as any[];
+
+    const formattedBlocks = localBlocks
+      .filter(b => !b.google_event_id || !googleEventIds.has(b.google_event_id))
+      .map(b => ({
+        id: `block-${b.id}`,
+        summary: b.summary,
+        description: "Indisponibilité",
+        start: { dateTime: b.start_time },
+        end: { dateTime: b.end_time },
+        isLocal: true,
+        isUnavailability: true
+      }));
+
+    res.json([...events, ...formattedLocal, ...formattedBlocks]);
   });
 
   app.post("/api/google/events", requireAdmin, async (req, res) => {
@@ -699,10 +833,34 @@ async function startServer() {
     const { id } = req.params;
     console.log(`Tentative de suppression de l'événement: ${id}`);
     
-    // Handle legacy local IDs if they still appear in the UI
+    // Réservation locale → annulation (libère le créneau)
     if (id.startsWith('local-')) {
       const localId = id.replace('local-', '');
       db.prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?").run(localId);
+      return res.json({ success: true });
+    }
+
+    // Indisponibilité locale → suppression (+ miroir Google via /api/blocks)
+    if (id.startsWith('block-')) {
+      const blockId = id.replace('block-', '');
+      const block = db.prepare("SELECT * FROM blocks WHERE id = ?").get(blockId) as any;
+      if (block) {
+        db.prepare("DELETE FROM blocks WHERE id = ?").run(blockId);
+        if (block.google_event_id) {
+          try {
+            const token = await getGoogleAccessToken();
+            if (token) {
+              const calSetting = db.prepare("SELECT value FROM settings WHERE key = 'google_calendar_id'").get() as { value: string } | undefined;
+              await axios.delete(
+                `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent((calSetting?.value || 'primary').trim())}/events/${encodeURIComponent(block.google_event_id)}`,
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+            }
+          } catch (err: any) {
+            console.error("Suppression du miroir Google impossible:", err.response?.data || err.message);
+          }
+        }
+      }
       return res.json({ success: true });
     }
 
