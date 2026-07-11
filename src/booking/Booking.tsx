@@ -70,13 +70,22 @@ export const BookingSection = ({
     if (selectedTime && !slots.includes(selectedTime)) setSelectedTime(null);
   }, [slots, selectedTime]);
 
-  // 12 prochains jours, jours fermés visibles mais désactivés.
+  // Calendrier aligné : 3 semaines lundi → samedi (dimanches et jours passés exclus),
+  // chaque jour de semaine toujours dans la même colonne. Jours fermés visibles mais désactivés.
   const days: DayCell[] = useMemo(() => {
+    const WEEKS = 3;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    // Lundi de la semaine en cours (getDay : 0 = dimanche … 6 = samedi).
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+
     const out: DayCell[] = [];
-    const base = new Date();
-    for (let i = 0; out.length < 12 && i < 20; i++) {
-      const d = new Date(base);
-      d.setDate(base.getDate() + i);
+    for (let i = 0; i < WEEKS * 7; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      if (d.getDay() === 0) continue; // pas de dimanche
+      if (d < today) continue; // pas de jour déjà passé
       const dateStr = toDateString(d);
       const hours = openingHours[getDayOfWeek(dateStr)];
       out.push({
@@ -84,15 +93,24 @@ export const BookingSection = ({
         weekday: d.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '').toUpperCase(),
         dayNum: d.getDate(),
         closed: hours ? hours.closed : false,
+        weekdayIndex: ((d.getDay() + 6) % 7) + 1, // 1 = lundi … 6 = samedi
       });
     }
     return out;
   }, [openingHours]);
 
-  const monthLabel = useMemo(
-    () => capitalize(new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })),
-    [],
-  );
+  const monthLabel = useMemo(() => {
+    if (!days.length) return '';
+    const toDate = (s: string) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+    const first = toDate(days[0].dateStr);
+    const last = toDate(days[days.length - 1].dateStr);
+    if (first.getMonth() === last.getMonth()) {
+      return capitalize(last.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }));
+    }
+    return capitalize(
+      `${first.toLocaleDateString('fr-FR', { month: 'long' })} – ${last.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`,
+    );
+  }, [days]);
 
   const steps: StepDef[] = [
     { label: 'Profil', value: selectedCategory?.name },
