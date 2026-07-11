@@ -11,8 +11,6 @@ export interface DayCell {
   weekdayIndex: number; // 1 = lundi … 6 = samedi (dimanche exclu)
 }
 
-const WEEKDAY_LABELS = ['LUN', 'MAR', 'MER', 'JEU', 'VEN', 'SAM'];
-
 const TimeChip = ({
   time,
   active,
@@ -100,36 +98,30 @@ export const SlotStep = ({
       />
       <Stepper steps={steps} current={3} />
 
-      {/* Calendrier : colonnes fixes lundi → samedi, chaque jour dans sa colonne */}
-      <div className="mb-9">
-        <div className="grid grid-cols-6 gap-1.5 sm:gap-2 mb-2">
-          {WEEKDAY_LABELS.map((w) => (
-            <div key={w} className="text-center mono-label text-muted-deep">{w}</div>
-          ))}
-        </div>
-        <div className="grid grid-cols-6 gap-1.5 sm:gap-2">
-          {days.map((d, i) => {
-            const active = selectedDate === d.dateStr;
-            return (
-              <button
-                key={d.dateStr}
-                type="button"
-                disabled={d.closed}
-                onClick={() => !d.closed && onSelectDate(d.dateStr)}
-                // Le premier jour se cale dans sa colonne ; les suivants s'enchaînent.
-                style={{ borderRadius: 'var(--radius-xs)', ...(i === 0 ? { gridColumnStart: d.weekdayIndex } : {}) }}
-                className={`py-3 flex flex-col items-center justify-center transition-colors duration-150 border ${
-                  active
-                    ? 'bg-dark text-white border-dark'
-                    : 'bg-white text-ink-soft border-hairline hover:border-dark'
-                } ${d.closed ? 'opacity-50 cursor-not-allowed hover:border-hairline' : ''}`}
-              >
-                <span className="font-serif text-xl sm:text-2xl font-medium leading-none">{d.dayNum}</span>
-                {d.closed && <span className="text-[8px] tracking-widest mt-1">FERMÉ</span>}
-              </button>
-            );
-          })}
-        </div>
+      {/* Calendrier aligné : chaque jour de semaine toujours dans la même colonne (lundi → samedi) */}
+      <div className="grid grid-cols-6 gap-1.5 sm:gap-2 mb-9">
+        {days.map((d, i) => {
+          const active = selectedDate === d.dateStr;
+          return (
+            <button
+              key={d.dateStr}
+              type="button"
+              disabled={d.closed}
+              onClick={() => !d.closed && onSelectDate(d.dateStr)}
+              // Le premier jour se cale dans sa colonne ; les suivants s'enchaînent naturellement.
+              style={{ borderRadius: 'var(--radius-xs)', ...(i === 0 ? { gridColumnStart: d.weekdayIndex } : {}) }}
+              className={`py-3.5 flex flex-col items-center transition-colors duration-150 border ${
+                active
+                  ? 'bg-dark text-white border-dark'
+                  : 'bg-white text-ink-soft border-hairline hover:border-dark'
+              } ${d.closed ? 'opacity-50 cursor-not-allowed hover:border-hairline' : ''}`}
+            >
+              <span className="text-[9px] tracking-[0.18em] font-semibold opacity-70">{d.weekday}</span>
+              <span className="font-serif text-2xl font-medium mt-0.5">{d.dayNum}</span>
+              {d.closed && <span className="text-[8px] tracking-widest mt-0.5">FERMÉ</span>}
+            </button>
+          );
+        })}
       </div>
 
       {/* Créneaux */}

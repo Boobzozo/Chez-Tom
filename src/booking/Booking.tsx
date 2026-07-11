@@ -70,10 +70,10 @@ export const BookingSection = ({
     if (selectedTime && !slots.includes(selectedTime)) setSelectedTime(null);
   }, [slots, selectedTime]);
 
-  // Calendrier aligné : 3 semaines lundi → samedi (dimanches et jours passés exclus),
+  // Calendrier aligné : 2 semaines lundi → samedi (dimanches et jours passés exclus),
   // chaque jour de semaine toujours dans la même colonne. Jours fermés visibles mais désactivés.
   const days: DayCell[] = useMemo(() => {
-    const WEEKS = 3;
+    const WEEKS = 2;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     // Lundi de la semaine en cours (getDay : 0 = dimanche … 6 = samedi).
