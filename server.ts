@@ -246,6 +246,16 @@ async function getGoogleAccessToken() {
   return token.access_token;
 }
 
+// Agenda Google cible : variable d'environnement prioritaire (fixée au déploiement,
+// ex. GOOGLE_CALENDAR_ID="…@group.calendar.google.com"), sinon le réglage choisi dans
+// l'admin, sinon l'agenda principal du compte lié.
+function resolveCalendarId(): string {
+  const fromEnv = process.env.GOOGLE_CALENDAR_ID?.trim();
+  if (fromEnv) return fromEnv;
+  const s = db.prepare("SELECT value FROM settings WHERE key = 'google_calendar_id'").get() as { value: string } | undefined;
+  return (s?.value || "primary").trim();
+}
+
 // Cache court des plages occupées Google (évite un appel par clic sur une date).
 const googleBusyCache = new Map<string, { ranges: Array<{ s: number; e: number }>; expiry: number }>();
 const GOOGLE_BUSY_TTL = 30 * 1000;
@@ -260,8 +270,7 @@ async function getGoogleBusyRanges(date: string): Promise<Array<{ s: number; e: 
   const token = await getGoogleAccessToken();
   if (!token) return [];
 
-  const calSetting = db.prepare("SELECT value FROM settings WHERE key = 'google_calendar_id'").get() as { value: string } | undefined;
-  const calendarId = (calSetting?.value || 'primary').trim();
+  const calendarId = resolveCalendarId();
   const cacheKey = `${calendarId}:${date}`;
   const cached = googleBusyCache.get(cacheKey);
   if (cached && Date.now() < cached.expiry) return cached.ranges;
@@ -679,8 +688,7 @@ async function startServer() {
     try {
       const token = await getGoogleAccessToken();
       if (token) {
-        const calSetting = db.prepare("SELECT value FROM settings WHERE key = 'google_calendar_id'").get() as { value: string } | undefined;
-        const calendarId = (calSetting?.value || "primary").trim();
+        const calendarId = resolveCalendarId();
         const response = await axios.post(
           `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
           {
@@ -708,8 +716,7 @@ async function startServer() {
       try {
         const token = await getGoogleAccessToken();
         if (token) {
-          const calSetting = db.prepare("SELECT value FROM settings WHERE key = 'google_calendar_id'").get() as { value: string } | undefined;
-          const calendarId = (calSetting?.value || "primary").trim();
+          const calendarId = resolveCalendarId();
           await axios.delete(
             `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(block.google_event_id)}`,
             { headers: { Authorization: `Bearer ${token}` } }
@@ -799,8 +806,7 @@ async function startServer() {
 
     // 1. Fetch from Google if possible
     if (googleAccessToken) {
-      const calendarIdSetting = db.prepare("SELECT value FROM settings WHERE key = 'google_calendar_id'").get() as { value: string } | undefined;
-      const calendarId = calendarIdSetting?.value || 'primary';
+      const calendarId = resolveCalendarId();
 
       try {
         const googleEventsResponse = await axios.get(
@@ -873,8 +879,7 @@ async function startServer() {
       return res.status(401).json({ error: "Google Calendar non connecté" });
     }
 
-    const calendarIdSetting = db.prepare("SELECT value FROM settings WHERE key = 'google_calendar_id'").get() as { value: string } | undefined;
-    const calendarId = (calendarIdSetting?.value || 'primary').trim();
+    const calendarId = resolveCalendarId();
 
     const cleanStart = start.split('.')[0].replace('Z', '').split('+')[0];
     const cleanEnd = end.split('.')[0].replace('Z', '').split('+')[0];
@@ -925,9 +930,8 @@ async function startServer() {
           try {
             const token = await getGoogleAccessToken();
             if (token) {
-              const calSetting = db.prepare("SELECT value FROM settings WHERE key = 'google_calendar_id'").get() as { value: string } | undefined;
               await axios.delete(
-                `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent((calSetting?.value || 'primary').trim())}/events/${encodeURIComponent(block.google_event_id)}`,
+                `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(resolveCalendarId())}/events/${encodeURIComponent(block.google_event_id)}`,
                 { headers: { Authorization: `Bearer ${token}` } }
               );
             }
@@ -944,8 +948,7 @@ async function startServer() {
       return res.status(401).json({ error: "Google Calendar non connecté" });
     }
 
-    const calendarIdSetting = db.prepare("SELECT value FROM settings WHERE key = 'google_calendar_id'").get() as { value: string } | undefined;
-    const calendarId = calendarIdSetting?.value || 'primary';
+    const calendarId = resolveCalendarId();
 
     try {
       await axios.delete(
@@ -977,8 +980,7 @@ async function startServer() {
       return res.status(401).json({ error: "Google Calendar non connecté" });
     }
 
-    const calendarIdSetting = db.prepare("SELECT value FROM settings WHERE key = 'google_calendar_id'").get() as { value: string } | undefined;
-    const calendarId = (calendarIdSetting?.value || 'primary').trim();
+    const calendarId = resolveCalendarId();
 
     const unsyncedBookings = db.prepare(`
       SELECT * FROM bookings 
