@@ -246,6 +246,63 @@ async function getGoogleAccessToken() {
   return token.access_token;
 }
 
+// Cache court des plages occupées Google (évite un appel par clic sur une date).
+const googleBusyCache = new Map<string, { ranges: Array<{ s: number; e: number }>; expiry: number }>();
+const GOOGLE_BUSY_TTL = 30 * 1000;
+
+/**
+ * Renvoie les plages occupées (en minutes depuis minuit, heure de Paris) issues de
+ * l'agenda Google configuré, pour une date donnée. Tous les événements comptent comme
+ * occupés, sauf ceux marqués « Disponible » (transparency) ou annulés. Peut lever une
+ * exception (réseau/Google) : l'appelant retombe alors sur le calcul local.
+ */
+async function getGoogleBusyRanges(date: string): Promise<Array<{ s: number; e: number }>> {
+  const token = await getGoogleAccessToken();
+  if (!token) return [];
+
+  const calSetting = db.prepare("SELECT value FROM settings WHERE key = 'google_calendar_id'").get() as { value: string } | undefined;
+  const calendarId = (calSetting?.value || 'primary').trim();
+  const cacheKey = `${calendarId}:${date}`;
+  const cached = googleBusyCache.get(cacheKey);
+  if (cached && Date.now() < cached.expiry) return cached.ranges;
+
+  // Heure murale (Paris) → minutes depuis minuit, lue directement dans la chaîne RFC3339.
+  const toMin = (dt: string) => parseInt(dt.slice(11, 13), 10) * 60 + parseInt(dt.slice(14, 16), 10);
+
+  const resp = await axios.get(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+    {
+      params: {
+        timeMin: new Date(`${date}T00:00:00`).toISOString(),
+        timeMax: new Date(`${date}T23:59:59`).toISOString(),
+        singleEvents: true,
+        orderBy: 'startTime',
+        timeZone: 'Europe/Paris',
+      },
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 4000,
+    }
+  );
+
+  const ranges: Array<{ s: number; e: number }> = [];
+  for (const ev of resp.data.items || []) {
+    if (ev.status === 'cancelled' || ev.transparency === 'transparent') continue;
+    if (ev.start?.date) {
+      // Événement « journée entière » couvrant ce jour → toute la journée occupée.
+      if (ev.start.date <= date && (!ev.end?.date || ev.end.date > date)) {
+        ranges.push({ s: 0, e: 24 * 60 });
+      }
+    } else if (ev.start?.dateTime && ev.end?.dateTime) {
+      const s = ev.start.dateTime.startsWith(date) ? toMin(ev.start.dateTime) : 0;
+      const e = ev.end.dateTime.startsWith(date) ? toMin(ev.end.dateTime) : 24 * 60;
+      if (e > s) ranges.push({ s, e });
+    }
+  }
+
+  googleBusyCache.set(cacheKey, { ranges, expiry: Date.now() + GOOGLE_BUSY_TTL });
+  return ranges;
+}
+
 async function startServer() {
   const app = express();
   const server = http.createServer(app);
@@ -551,7 +608,7 @@ async function startServer() {
   });
 
   // --- Disponibilité (source de vérité : SQLite, pas de dépendance Google/n8n) ---
-  app.get("/api/availability", (req, res) => {
+  app.get("/api/availability", async (req, res) => {
     const date = String(req.query.date || "");
     const duration = Number(req.query.duration);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(duration) || duration <= 0 || duration > 480) {
@@ -573,7 +630,7 @@ async function startServer() {
     const breakStart = hours.has_break ? toMin(hours.break_start || "12:00") : null;
     const breakEnd = hours.has_break ? toMin(hours.break_end || "14:00") : null;
 
-    // Plages occupées du jour : réservations confirmées + indisponibilités.
+    // Plages occupées du jour : réservations confirmées + indisponibilités locales.
     const busy: Array<{ s: number; e: number }> = [];
     const dayStart = `${date}T00:00:00`;
     const dayEnd = `${date}T23:59:59`;
@@ -586,6 +643,15 @@ async function startServer() {
       const sMin = r.start_time.startsWith(date) ? s.getHours() * 60 + s.getMinutes() : 0;
       const eMin = r.end_time.startsWith(date) ? e.getHours() * 60 + e.getMinutes() : 24 * 60;
       busy.push({ s: sMin, e: eMin });
+    }
+
+    // + événements de l'agenda Google du gérant (synchro dans le sens Google → site).
+    // Si Google est injoignable, on continue avec le calcul local (jamais bloquant).
+    try {
+      const googleBusy = await getGoogleBusyRanges(date);
+      busy.push(...googleBusy);
+    } catch (err: any) {
+      console.log(`Disponibilité : agenda Google injoignable, calcul local seul (${err.response?.status || err.message})`);
     }
 
     const slots: string[] = [];

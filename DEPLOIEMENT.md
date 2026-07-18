@@ -110,6 +110,14 @@ les nœuds Google Agenda/Sheets — ou n'utilisez pas n8n du tout.
 3. Lier Google Calendar (bouton dans Configuration) si souhaité — nécessite
    `APP_URL`, `GOOGLE_CLIENT_ID` et `GOOGLE_CLIENT_SECRET`, et l'URL de redirection
    `https://votre-domaine.fr/auth/google/callback` déclarée dans la console Google Cloud.
+   - **Publier l'app OAuth « en production »** dans la console Google (écran de consentement) :
+     en mode « test », Google invalide la liaison au bout de 7 jours. Une fois publiée,
+     la liaison est permanente (le site rafraîchit le jeton tout seul).
+   - **Synchro deux sens** : une fois lié, **tous les événements** de l'agenda choisi
+     bloquent les réservations en ligne (le gérant peut donc bloquer un créneau simplement
+     en l'ajoutant à son Google Agenda depuis son téléphone). Pour qu'un événement perso
+     ne bloque PAS, le marquer « Disponible » dans Google Agenda. Astuce : utiliser un
+     agenda Google dédié (sélectionnable dans Configuration) pour séparer perso et salon.
 4. Déclarer le site sur [Google Search Console](https://search.google.com/search-console)
    et soumettre `https://votre-domaine.fr/sitemap.xml`.
 5. Créer la fiche [Google Business Profile](https://business.google.com) du salon

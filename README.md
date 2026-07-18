@@ -60,9 +60,16 @@ Copier `.env.example` en `.env`. Tout est **facultatif** pour tester en local :
 La base SQLite est la source de vérité : le serveur calcule lui-même les créneaux libres
 (horaires d'ouverture − réservations confirmées − indisponibilités).
 
+**Synchro Google dans les deux sens (si un agenda est lié).** En plus du local,
+`/api/availability` lit l'agenda Google du gérant : **tout événement** qu'il y ajoute
+directement (depuis son téléphone, par exemple une sortie perso) **bloque le créneau
+côté client**. Exceptions : les événements marqués « Disponible » (transparency) ne
+bloquent pas, et un événement « journée entière » bloque toute la journée.
+Si Google est momentanément injoignable, le calcul retombe sur le local (jamais bloquant).
+
 ```
 Visiteur → tunnel de réservation (4 étapes, src/booking/)
-  étape créneau  → GET /api/availability (calcul local, instantané)
+  étape créneau  → GET /api/availability (local + agenda Google du gérant)
   confirmation   → POST /api/bookings (validé + limité côté serveur)
        ├─ enregistrement SQLite (source de vérité)
        ├─ email Resend (si RESEND_API_KEY)
