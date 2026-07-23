@@ -92,7 +92,7 @@ const Hero = () => (
         transition={{ delay: 0.2 }}
         className="text-5xl md:text-8xl font-serif mb-8 leading-tight luxury-text-shadow text-paper"
       >
-        Tom <br /> <span className="italic text-gold">Barber<span className="text-paper">.</span></span>
+        Tom <br /> <span className="italic text-gold">Barber</span>
       </motion.h1>
       <motion.div
         initial={{ opacity: 0, y: 10 }}
