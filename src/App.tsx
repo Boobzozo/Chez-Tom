@@ -26,9 +26,16 @@ const Navbar = ({ isAdmin }: { isAdmin: boolean }) => {
   return (
     <nav className={`fixed top-0 left-0 right-0 z-50 px-6 py-4 transition-all duration-500 ${scrolled ? 'bg-paper/90 backdrop-blur-md shadow-sm' : 'bg-transparent'}`}>
       <div className="max-w-7xl mx-auto flex justify-between items-center">
-        <div className={`text-2xl font-serif font-bold tracking-[0.3em] transition-colors duration-500 ${scrolled ? 'text-dark' : 'text-paper'}`}>
-          TOM BARBER
-        </div>
+        <a href="#" className="flex items-center gap-3 group">
+          {/* Monogramme TB (or + filet-rasoir) */}
+          <span className="flex flex-col items-center leading-none shrink-0">
+            <span className="font-serif font-semibold text-gold text-[26px] tracking-[-0.07em] leading-none">TB</span>
+            <span className="w-5 h-px bg-gold mt-[3px] opacity-90"></span>
+          </span>
+          <span className={`text-lg md:text-2xl font-serif font-bold tracking-[0.28em] transition-colors duration-500 ${scrolled ? 'text-dark' : 'text-paper'}`}>
+            TOM BARBER
+          </span>
+        </a>
         
         <div className={`hidden md:flex items-center space-x-8 text-xs uppercase tracking-widest font-medium transition-colors duration-500 ${scrolled ? 'text-dark' : 'text-paper'}`}>
           <a href="#services" className="hover:text-gold transition-colors">Services</a>
