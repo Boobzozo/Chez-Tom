@@ -29,7 +29,7 @@ const Navbar = ({ isAdmin }: { isAdmin: boolean }) => {
         <a
           href="#"
           aria-label="Tom Barber — accueil"
-          className="brand-logo font-bold text-xl md:text-3xl transition-colors duration-500"
+          className="brand-logo font-bold text-2xl md:text-4xl transition-colors duration-500"
           style={{ color: scrolled ? 'var(--color-dark)' : 'var(--color-paper)' }}
         >
           <span className="lead">T</span><span className="ltr">o</span><span className="ltr">m</span><span className="ltr sp"> </span><span className="lead">B</span><span className="ltr">a</span><span className="ltr">r</span><span className="ltr">b</span><span className="ltr">e</span><span className="ltr">r</span>
