@@ -86,6 +86,39 @@
   letter-spacing: 0.24em;
 }
 
+/* Logo de la navbar : « TB » qui s'écrit en « Tom Barber » (T et B dorés).
+   Les leads (T, B) sont là dès le départ ; les autres lettres s'écrivent une à une. */
+.brand-logo {
+  font-family: var(--font-serif);
+  display: inline-flex;
+  align-items: baseline;
+  white-space: nowrap;
+  line-height: 1;
+  letter-spacing: 0.01em;
+}
+.brand-logo .lead { color: var(--color-gold); }
+.brand-logo .ltr {
+  display: inline-block;
+  overflow: hidden;
+  white-space: pre;
+  max-width: 0;
+  opacity: 0;
+  transform: translateY(0.06em);
+  animation: brandWrite 0.26s cubic-bezier(0.22, 0.61, 0.28, 1) both;
+  transition: color 0.4s ease;
+}
+.brand-logo .ltr.sp { animation-name: brandWriteSp; }
+.brand-logo .ltr:nth-child(2)  { animation-delay: 0.30s; }
+.brand-logo .ltr:nth-child(3)  { animation-delay: 0.37s; }
+.brand-logo .ltr:nth-child(4)  { animation-delay: 0.44s; }
+.brand-logo .ltr:nth-child(6)  { animation-delay: 0.51s; }
+.brand-logo .ltr:nth-child(7)  { animation-delay: 0.58s; }
+.brand-logo .ltr:nth-child(8)  { animation-delay: 0.65s; }
+.brand-logo .ltr:nth-child(9)  { animation-delay: 0.72s; }
+.brand-logo .ltr:nth-child(10) { animation-delay: 0.79s; }
+@keyframes brandWrite   { to { max-width: 1.05em; opacity: 1; transform: none; } }
+@keyframes brandWriteSp { to { max-width: 0.32em; opacity: 1; transform: none; } }
+
 /* Focus clavier visible sur tous les éléments interactifs du tunnel */
 #booking button:focus-visible,
 #booking a:focus-visible,
