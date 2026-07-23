@@ -1,4 +1,4 @@
-// Types partagés de l'application Chez Tom
+// Types partagés de l'application Tom Barber
 
 export interface Service {
   id: string;

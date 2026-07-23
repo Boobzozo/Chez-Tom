@@ -504,12 +504,12 @@ async function startServer() {
               ? `<p style="margin: 5px 0; color:#6E6A63;">${svc.description}</p>`
               : '';
             await resend.emails.send({
-              from: 'Chez Tom <onboarding@resend.dev>',
+              from: 'Tom Barber <onboarding@resend.dev>',
               to: customer_email,
-              subject: 'Confirmation de votre rendez-vous - Chez Tom',
+              subject: 'Confirmation de votre rendez-vous - Tom Barber',
               html: `
                 <div style="font-family: Georgia, serif; color: #1A1A1A; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #E2DACB;">
-                  <h1 style="text-align: center; color: #A8884A; letter-spacing: 0.2em; font-weight: 400;">CHEZ TOM</h1>
+                  <h1 style="text-align: center; color: #A8884A; letter-spacing: 0.2em; font-weight: 400;">TOM BARBER</h1>
                   <p>Bonjour <strong>${customer_name}</strong>,</p>
                   <p>Votre rendez-vous est confirmé. Nous avons hâte de vous accueillir.</p>
                   <div style="background-color: #F5F1EA; padding: 18px; margin: 20px 0; border-left: 3px solid #C8A968;">
@@ -518,10 +518,10 @@ async function startServer() {
                     <p style="margin: 5px 0;"><strong>Date :</strong> ${dateStr}</p>
                     <p style="margin: 5px 0;"><strong>Heure :</strong> ${timeStr}</p>
                   </div>
-                  <p style="font-size: 14px; color: #6E6A63;">Adresse : 123 Rue de l'Élégance, 75001 Paris</p>
+                  <p style="font-size: 14px; color: #6E6A63;">Adresse : Martigné-sur-Mayenne, 53470</p>
                   <p style="font-size: 14px; color: #6E6A63;">Téléphone : 01 23 45 67 89</p>
                   <hr style="border: 0; border-top: 1px solid #E2DACB; margin: 20px 0;" />
-                  <p style="text-align: center; font-size: 12px; color: #8A857C;">&copy; ${new Date().getFullYear()} Chez Tom. Tous droits réservés.</p>
+                  <p style="text-align: center; font-size: 12px; color: #8A857C;">&copy; ${new Date().getFullYear()} Tom Barber. Tous droits réservés.</p>
                 </div>
               `
             });
@@ -998,7 +998,7 @@ async function startServer() {
           `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
           {
             summary: `${booking.customer_name} (${booking.service_type})`,
-            description: `Réservation via le site Chez Tom. Client: ${booking.customer_name} (${booking.customer_email})`,
+            description: `Réservation via le site Tom Barber. Client: ${booking.customer_name} (${booking.customer_email})`,
             start: { 
               dateTime: cleanStart,
               timeZone: 'Europe/Paris' 

@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /admin
 
-Sitemap: https://chez-tom.fr/sitemap.xml
+Sitemap: https://tom-barber.fr/sitemap.xml

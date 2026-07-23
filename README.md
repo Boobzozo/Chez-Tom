@@ -1,4 +1,4 @@
-# Chez Tom — Barbier & Coiffeur
+# Tom Barber — Barbier & Coiffeur
 
 Site vitrine avec **réservation en ligne** et **espace gérant** pour un salon de coiffure/barbier.
 
@@ -86,7 +86,7 @@ adaptez seulement le workflow n8n (nœud Gmail → SMTP) si vous voulez l'email 
 
 ## Avant la mise en ligne — checklist
 
-1. **Domaine** : remplacer `https://chez-tom.fr` par votre domaine réel dans
+1. **Domaine** : remplacer `https://tom-barber.fr` par votre domaine réel dans
    `index.html` (canonical, Open Graph, JSON-LD), `public/robots.txt`, `public/sitemap.xml`.
 2. **Coordonnées du salon** : adresse/téléphone dans `index.html` (JSON-LD),
    `src/App.tsx` (pied de page), `src/booking/Booking.tsx` (`SALON_ADDRESS`) et `server.ts` (email).

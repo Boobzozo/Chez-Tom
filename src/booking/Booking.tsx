@@ -9,7 +9,7 @@ import { ContactStep, ContactValues } from './steps/ContactStep';
 import { Confirmation } from './steps/Confirmation';
 import { useAvailability, getLocalDateString, getDayOfWeek, toDateString, pad } from './useAvailability';
 
-const SALON_ADDRESS = '123 Rue de l\'Élégance · Paris 1er';
+const SALON_ADDRESS = 'Martigné-sur-Mayenne · 53470';
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -131,10 +131,10 @@ export const BookingSection = ({
     const toGcal = (iso: string) => iso.replace(/[-:]/g, '');
     const params = new URLSearchParams({
       action: 'TEMPLATE',
-      text: `Chez Tom · ${selectedService?.name ?? 'Rendez-vous'}`,
+      text: `Tom Barber · ${selectedService?.name ?? 'Rendez-vous'}`,
       dates: `${toGcal(start)}/${toGcal(end)}`,
       location: SALON_ADDRESS,
-      details: 'Votre rendez-vous chez Chez Tom.',
+      details: 'Votre rendez-vous chez Tom Barber.',
     });
     return `https://calendar.google.com/calendar/render?${params.toString()}`;
   };

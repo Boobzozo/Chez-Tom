@@ -1,4 +1,4 @@
-# Déploiement — Chez Tom
+# Déploiement — Tom Barber
 
 Guide pas à pas pour mettre le site en ligne sur un **VPS** (Hostinger, OVH, Scaleway…).
 Le site est un unique serveur Node : pas de base de données externe à installer.
@@ -39,7 +39,7 @@ GOOGLE_CLIENT_SECRET="…"
 RESEND_API_KEY=""           # vide si l'email part de n8n
 ```
 
-Puis remplacer `https://chez-tom.fr` par votre domaine dans
+Puis remplacer `https://tom-barber.fr` par votre domaine dans
 `index.html`, `public/robots.txt` et `public/sitemap.xml` (checklist complète dans le README).
 
 ## 3. Build + lancement avec PM2
