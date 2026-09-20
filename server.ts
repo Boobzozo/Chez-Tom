@@ -12,11 +12,37 @@ import crypto from "crypto";
 
 dotenv.config();
 
+// Fuseau horaire : toutes les dates du planning sont des heures murales de Paris.
+// Sur un VPS réglé en UTC, sans ceci, « créneau passé » et « il y a X min » se décalent.
+if (!process.env.TZ) process.env.TZ = "Europe/Paris";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const db = new Database("chez-tom.db");
+// ---------------------------------------------------------------------------
+// Configuration (variables d'environnement, toutes facultatives sauf indication)
+// ---------------------------------------------------------------------------
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+// Chemin absolu par défaut : lancé depuis n'importe quel dossier, on retrouve la même base.
+const DB_PATH = process.env.DB_PATH?.trim() || path.resolve(__dirname, "chez-tom.db");
+// Webhooks n8n (vides = désactivés).
+const N8N_BOOKING_WEBHOOK_URL = process.env.N8N_BOOKING_WEBHOOK_URL?.trim() || "";
+const N8N_TELEGRAM_WEBHOOK_URL = process.env.N8N_TELEGRAM_WEBHOOK_URL?.trim() || "";
+// Expéditeur des emails Resend. `onboarding@resend.dev` est le bac à sable Resend :
+// il ne livre qu'à l'adresse du compte. En production, utiliser un domaine vérifié.
+const MAIL_FROM = process.env.MAIL_FROM?.trim() || "Tom Barber <onboarding@resend.dev>";
+
+const db = new Database(DB_PATH);
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+
+console.log(`[config] Base SQLite : ${DB_PATH}`);
+console.log(`[config] Fuseau horaire : ${process.env.TZ}`);
+console.log(`[config] Webhook n8n réservation : ${N8N_BOOKING_WEBHOOK_URL || "désactivé"}`);
+console.log(`[config] Webhook n8n Telegram : ${N8N_TELEGRAM_WEBHOOK_URL || "désactivé"}`);
+console.log(`[config] Email Resend : ${resend ? `actif, expéditeur ${MAIL_FROM}` : "désactivé"}`);
+if (resend && MAIL_FROM.includes("@resend.dev")) {
+  console.warn("[config] ⚠️  MAIL_FROM utilise le bac à sable Resend : les clients ne recevront pas l'email. Renseignez MAIL_FROM avec un domaine vérifié.");
+}
 
 // Initialize database
 db.exec(`
@@ -166,6 +192,15 @@ const verifyPassword = (password: string, stored: string | undefined) => {
   }
 }
 
+// Échappement HTML pour les valeurs saisies par les clients et insérées dans un email.
+const escapeHtml = (value: unknown) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
 // Tokens de session admin, en mémoire (invalidés au redémarrage).
 const ADMIN_TOKEN_TTL = 24 * 60 * 60 * 1000; // 24 h
 const adminTokens = new Map<string, number>();
@@ -214,6 +249,13 @@ const rateLimit = (bucket: string, maxAttempts: number, windowMs: number) =>
     }
     next();
   };
+
+// Purge périodique des compteurs et tokens expirés (sinon les Map grossissent sans fin).
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of rateBuckets) if (now > entry.resetAt) rateBuckets.delete(key);
+  for (const [token, expiry] of adminTokens) if (now > expiry) adminTokens.delete(token);
+}, 10 * 60 * 1000).unref();
 
 async function getGoogleAccessToken() {
   const token = db.prepare("SELECT * FROM google_tokens WHERE id = 1").get() as any;
@@ -316,6 +358,23 @@ async function startServer() {
   const server = http.createServer(app);
   const io = new Server(server);
   const PORT = Number(process.env.PORT) || 3000;
+
+  // Derrière Nginx (voir DEPLOIEMENT.md), l'IP réelle du visiteur arrive dans
+  // X-Forwarded-For. Sans ceci, req.ip vaut 127.0.0.1 pour tout le monde et le
+  // rate limiting devient global : 5 réservations bloquent le site entier.
+  app.set("trust proxy", 1);
+  app.disable("x-powered-by");
+
+  // En-têtes de sécurité de base.
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    // HSTS uniquement quand la requête est réellement arrivée en HTTPS (via le proxy).
+    if (req.secure) res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    next();
+  });
 
   app.use(express.json({ limit: '5mb' }));
   app.use(express.urlencoded({ limit: '5mb', extended: true }));
@@ -500,23 +559,25 @@ async function startServer() {
         if (resend) {
           try {
             const svc = db.prepare("SELECT description FROM services WHERE name = ?").get(service_type) as { description?: string } | undefined;
+            // Tout ce qui vient du client ou de la base est échappé : sinon, n'importe qui
+            // peut faire envoyer par le salon un email au contenu arbitraire.
             const descLine = svc?.description
-              ? `<p style="margin: 5px 0; color:#6E6A63;">${svc.description}</p>`
+              ? `<p style="margin: 5px 0; color:#6E6A63;">${escapeHtml(svc.description)}</p>`
               : '';
             await resend.emails.send({
-              from: 'Tom Barber <onboarding@resend.dev>',
+              from: MAIL_FROM,
               to: customer_email,
               subject: 'Confirmation de votre rendez-vous - Tom Barber',
               html: `
                 <div style="font-family: Georgia, serif; color: #1A1A1A; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #E2DACB;">
                   <h1 style="text-align: center; color: #A8884A; letter-spacing: 0.2em; font-weight: 400;">TOM BARBER</h1>
-                  <p>Bonjour <strong>${customer_name}</strong>,</p>
+                  <p>Bonjour <strong>${escapeHtml(customer_name)}</strong>,</p>
                   <p>Votre rendez-vous est confirmé. Nous avons hâte de vous accueillir.</p>
                   <div style="background-color: #F5F1EA; padding: 18px; margin: 20px 0; border-left: 3px solid #C8A968;">
-                    <p style="margin: 5px 0;"><strong>Prestation :</strong> ${service_type}</p>
+                    <p style="margin: 5px 0;"><strong>Prestation :</strong> ${escapeHtml(service_type)}</p>
                     ${descLine}
-                    <p style="margin: 5px 0;"><strong>Date :</strong> ${dateStr}</p>
-                    <p style="margin: 5px 0;"><strong>Heure :</strong> ${timeStr}</p>
+                    <p style="margin: 5px 0;"><strong>Date :</strong> ${escapeHtml(dateStr)}</p>
+                    <p style="margin: 5px 0;"><strong>Heure :</strong> ${escapeHtml(timeStr)}</p>
                   </div>
                   <p style="font-size: 14px; color: #6E6A63;">Adresse : Martigné-sur-Mayenne, 53470</p>
                   <p style="font-size: 14px; color: #6E6A63;">Téléphone : 01 23 45 67 89</p>
@@ -530,9 +591,9 @@ async function startServer() {
           }
         }
 
-        // 2. Webhooks n8n (non bloquants)
-        const webhookUrl = "https://n8n.srv1043923.hstgr.cloud/webhook/reservation-chez-tom";
-        const telegramNotifyUrl = "https://n8n.srv1043923.hstgr.cloud/webhook/notification-telegram";
+        // 2. Webhooks n8n (non bloquants, désactivés si l'URL n'est pas configurée)
+        const webhookUrl = N8N_BOOKING_WEBHOOK_URL;
+        const telegramNotifyUrl = N8N_TELEGRAM_WEBHOOK_URL;
         let reservationId = `TOM-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 10000)}`;
 
         // Fetch service details
@@ -558,23 +619,27 @@ async function startServer() {
 
         // Notification Telegram du gérant — fire-and-forget :
         // tant que le workflow n8n est inactif, l'appel échoue silencieusement.
-        axios.post(telegramNotifyUrl, webhookPayload, { timeout: 5000 }).catch((err) => {
-          console.log(`Notification Telegram non délivrée (workflow inactif ?): ${err.response?.status || err.message}`);
-        });
+        if (telegramNotifyUrl) {
+          axios.post(telegramNotifyUrl, webhookPayload, { timeout: 5000 }).catch((err) => {
+            console.log(`Notification Telegram non délivrée (workflow inactif ?): ${err.response?.status || err.message}`);
+          });
+        }
 
-        try {
-          const webhookResponse = await axios.post(webhookUrl, webhookPayload);
+        if (webhookUrl) {
+          try {
+            const webhookResponse = await axios.post(webhookUrl, webhookPayload, { timeout: 15000 });
 
-          if (webhookResponse.data && webhookResponse.data.success) {
-            if (webhookResponse.data.reservation_id) reservationId = webhookResponse.data.reservation_id;
-            
-            // If n8n returns a google_event_id, update the local booking
-            if (webhookResponse.data.google_event_id) {
-              db.prepare("UPDATE bookings SET google_event_id = ? WHERE id = ?").run(webhookResponse.data.google_event_id, localId);
+            if (webhookResponse.data && webhookResponse.data.success) {
+              if (webhookResponse.data.reservation_id) reservationId = webhookResponse.data.reservation_id;
+
+              // If n8n returns a google_event_id, update the local booking
+              if (webhookResponse.data.google_event_id) {
+                db.prepare("UPDATE bookings SET google_event_id = ? WHERE id = ?").run(webhookResponse.data.google_event_id, localId);
+              }
             }
+          } catch (webhookErr: any) {
+            console.error("Webhook error:", webhookErr.response?.status || webhookErr.message);
           }
-        } catch (webhookErr) {
-          console.error("Webhook error:", webhookErr);
         }
 
         // Always create notification
@@ -728,15 +793,29 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.get("/api/settings", (req, res) => {
+  const readSettings = () => {
     const settings = db.prepare("SELECT * FROM settings").all();
     const settingsMap = settings.reduce((acc: any, curr: any) => {
       acc[curr.key] = curr.value;
       return acc;
     }, {});
-    // Jamais de secret côté public.
+    // Jamais de secret, même pour l'admin (le hash n'a rien à faire côté client).
     delete settingsMap.admin_password;
-    res.json(settingsMap);
+    return settingsMap as Record<string, string>;
+  };
+
+  // Réglages publics : liste blanche, le reste (agenda Google, etc.) ne sort pas.
+  const PUBLIC_SETTINGS = ["show_gallery", "show_about", "opening_hours"];
+  app.get("/api/settings", (req, res) => {
+    const all = readSettings();
+    const pub: Record<string, string> = {};
+    for (const key of PUBLIC_SETTINGS) if (all[key] !== undefined) pub[key] = all[key];
+    res.json(pub);
+  });
+
+  // Réglages complets pour l'espace gérant.
+  app.get("/api/admin/settings", requireAdmin, (req, res) => {
+    res.json(readSettings());
   });
 
   app.post("/api/settings", requireAdmin, (req, res) => {
@@ -1147,7 +1226,7 @@ async function startServer() {
   });
 
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  if (!IS_PRODUCTION) {
     console.log("Initializing Vite middleware...");
     // Import dynamique : en production, vite n'est jamais chargé (le serveur sert dist/).
     const { createServer: createViteServer } = await import("vite");
@@ -1172,8 +1251,23 @@ async function startServer() {
     console.log("Vite middleware integrated successfully.");
   } else {
     const distPath = path.resolve(__dirname, "dist");
-    app.use(express.static(distPath));
+    if (!fs.existsSync(path.join(distPath, "index.html"))) {
+      console.error("[prod] dist/index.html introuvable : lancez `npm run build` avant `npm start`.");
+    }
+    // Les fichiers de dist/assets/ portent un hash dans leur nom : cache long et immuable.
+    // Tout le reste (index.html, robots, sitemap, favicon) est revalidé à chaque visite.
+    app.use(express.static(distPath, {
+      index: false,
+      setHeaders: (res, filePath) => {
+        if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        } else {
+          res.setHeader("Cache-Control", "no-cache");
+        }
+      },
+    }));
     app.get("*", (req, res) => {
+      res.setHeader("Cache-Control", "no-cache");
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

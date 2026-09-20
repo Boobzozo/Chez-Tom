@@ -491,9 +491,11 @@ function AppContent() {
     })
   });
 
-  const fetchSettings = async () => {
+  // Le site public ne reçoit que les réglages publics ; l'espace gérant
+  // lit la version complète (agenda Google, etc.) via la route authentifiée.
+  const fetchSettings = async (asAdmin: boolean = isAdmin) => {
     try {
-      const res = await fetch('/api/settings');
+      const res = asAdmin ? await adminFetch('/api/admin/settings') : await fetch('/api/settings');
       if (res.ok) {
         const data = await res.json();
         setSettings(prev => ({ ...prev, ...data }));
@@ -534,7 +536,10 @@ function AppContent() {
     // Sur /admin : restaure la session si un token valide est encore présent.
     if (isAdminRoute) {
       checkAdminSession().then((ok) => {
-        if (ok) setIsAdmin(true);
+        if (ok) {
+          setIsAdmin(true);
+          fetchSettings(true);
+        }
         setSessionChecked(true);
       });
     }
@@ -546,7 +551,7 @@ function AppContent() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key, value })
     });
-    fetchSettings();
+    fetchSettings(true);
   };
 
   const handleAdminLogin = async () => {
@@ -558,6 +563,7 @@ function AppContent() {
     if (result.ok) {
       setIsAdmin(true);
       setPassword('');
+      fetchSettings(true);
     } else {
       setLoginError(result.error ?? 'Mot de passe incorrect');
     }
