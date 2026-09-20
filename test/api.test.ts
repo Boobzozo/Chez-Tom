@@ -67,6 +67,7 @@ before(async () => {
       NODE_ENV: "test",
       PORT: String(PORT),
       DB_PATH: path.join(tmpDir, "test.db"),
+      UPLOADS_DIR: path.join(tmpDir, "uploads"),
       TZ: "Europe/Paris",
       RESEND_API_KEY: "",
       GOOGLE_CLIENT_ID: "",
@@ -256,6 +257,33 @@ test("mot de passe : le défaut doit être remplacé, jamais réutilisé", async
   const relogin = await api("POST", "/api/admin/login", { password: "nouveau-mdp-2026" });
   assert.equal(relogin.status, 200);
   assert.equal(relogin.data.mustChangePassword, false);
+});
+
+test("galerie : la photo est écrite sur disque, servie sur /uploads, supprimée avec la ligne", async () => {
+  // PNG 1×1 valide.
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+  const created = await api("POST", "/api/gallery", { url: `data:image/png;base64,${png}`, caption: "Test" }, adminToken);
+  assert.equal(created.status, 201, JSON.stringify(created.data));
+  assert.match(created.data.url, /^\/uploads\/[a-z0-9]+-[a-f0-9]{12}\.png$/);
+
+  const file = await fetch(`${BASE}${created.data.url}`);
+  assert.equal(file.status, 200);
+  assert.equal(file.headers.get("content-type"), "image/png");
+  assert.match(file.headers.get("cache-control") ?? "", /immutable/);
+
+  const pub = await api("GET", "/api/gallery");
+  assert.ok(pub.data.some((i: any) => i.id === created.data.id && i.url === created.data.url));
+  assert.ok(!JSON.stringify(pub.data).includes("base64"), "plus de base64 dans la réponse publique");
+
+  // Refus : type non image, données non base64, sans token.
+  assert.equal((await api("POST", "/api/gallery", { url: "data:text/html;base64,PGI+", caption: "" }, adminToken)).status, 400);
+  assert.equal((await api("POST", "/api/gallery", { url: "javascript:alert(1)" }, adminToken)).status, 400);
+  assert.equal((await api("POST", "/api/gallery", { url: `data:image/png;base64,${png}` })).status, 401);
+
+  const del = await api("DELETE", `/api/gallery/${created.data.id}`, undefined, adminToken);
+  assert.equal(del.status, 200);
+  assert.equal((await fetch(`${BASE}${created.data.url}`)).status, 404);
+  assert.equal((await api("DELETE", `/api/gallery/${created.data.id}`, undefined, adminToken)).status, 404);
 });
 
 test("OAuth Google : le callback refuse un appel sans state valide", async () => {

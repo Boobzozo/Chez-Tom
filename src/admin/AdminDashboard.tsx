@@ -58,9 +58,40 @@ const getLocalDateString = () => {
   const pad = (n: number) => n.toString().padStart(2, '0');
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 };
+/**
+ * Redimensionne une photo dans le navigateur avant envoi (côté long ≤ maxSide px,
+ * JPEG qualité 0.85). Une photo de téléphone de 4 Mo devient ~300 Ko : le serveur
+ * refuse au-delà de 3 Mo et la page publique reste légère.
+ */
+const resizeImageFile = (file: File, maxSide = 1600, quality = 0.85): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return reject(new Error('canvas'));
+      // Fond blanc : un PNG transparent converti en JPEG ne devient pas noir.
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Ce fichier n'est pas une image lisible par le navigateur."));
+    };
+    img.src = objectUrl;
+  });
+
 const GalleryManager = () => {
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [caption, setCaption] = useState('');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -87,27 +118,25 @@ const GalleryManager = () => {
     if (!file) return;
 
     setIsUploading(true);
+    setUploadError(null);
     try {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64String = reader.result as string;
-        
-        const res = await adminFetch('/api/gallery', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: base64String, caption })
-        });
-
-        if (res.ok) {
-          setCaption('');
-          if (fileInputRef.current) fileInputRef.current.value = '';
-          fetchGallery();
-        }
-        setIsUploading(false);
-      };
-      reader.readAsDataURL(file);
-    } catch (err) {
-      console.error("Error uploading file:", err);
+      const dataUrl = await resizeImageFile(file);
+      const res = await adminFetch('/api/gallery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: dataUrl, caption })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setCaption('');
+        fetchGallery();
+      } else {
+        setUploadError(data.error || "Impossible d'ajouter la photo.");
+      }
+    } catch (err: any) {
+      setUploadError(err?.message || "Impossible de lire ce fichier.");
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
       setIsUploading(false);
     }
   };
@@ -156,6 +185,12 @@ const GalleryManager = () => {
             {isUploading ? "Envoi en cours..." : "Choisir une photo"}
           </label>
         </div>
+        <p className="text-[10px] text-muted-deep leading-tight">
+          JPEG, PNG ou WebP. La photo est réduite automatiquement à 1600 px avant l'envoi.
+        </p>
+        {uploadError && (
+          <p role="alert" className="text-xs" style={{ color: '#B23A2B' }}>{uploadError}</p>
+        )}
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">

@@ -11,3 +11,6 @@ coverage/
 *.db
 *.db-journal
 *.db-wal
+
+# Photos de la galerie (données du salon, sauvegardées avec la base)
+uploads/

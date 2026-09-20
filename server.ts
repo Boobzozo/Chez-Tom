@@ -34,10 +34,15 @@ const N8N_TELEGRAM_WEBHOOK_URL = process.env.N8N_TELEGRAM_WEBHOOK_URL?.trim() ||
 // il ne livre qu'à l'adresse du compte. En production, utiliser un domaine vérifié.
 const MAIL_FROM = process.env.MAIL_FROM?.trim() || "Tom Barber <onboarding@resend.dev>";
 
+// Photos de la galerie : fichiers sur disque (servis sur /uploads), jamais en base.
+const UPLOADS_DIR = process.env.UPLOADS_DIR?.trim() || path.resolve(__dirname, "uploads");
+fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
 const db = new Database(DB_PATH);
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 console.log(`[config] Base SQLite : ${DB_PATH}`);
+console.log(`[config] Photos (uploads) : ${UPLOADS_DIR}`);
 console.log(`[config] Fuseau horaire : ${process.env.TZ}`);
 console.log(`[config] Webhook n8n réservation : ${N8N_BOOKING_WEBHOOK_URL || "désactivé"}`);
 console.log(`[config] Webhook n8n Telegram : ${N8N_TELEGRAM_WEBHOOK_URL || "désactivé"}`);
@@ -166,6 +171,53 @@ try {
   db.prepare("ALTER TABLE services ADD COLUMN description TEXT").run();
 } catch (e) {
   // Column already exists or other error
+}
+
+// ---------------------------------------------------------------------------
+// Galerie : images en fichiers. Le navigateur envoie une data URL (déjà
+// redimensionnée côté client) ; on la valide, on l'écrit dans UPLOADS_DIR et on
+// ne garde en base que l'URL publique /uploads/<nom>.
+// ---------------------------------------------------------------------------
+const IMAGE_TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+const MAX_IMAGE_BYTES = 3 * 1024 * 1024; // après redimensionnement client, une photo fait ~200–500 Ko
+
+/** Écrit une data URL image dans UPLOADS_DIR. Renvoie l'URL publique, ou une erreur lisible. */
+function saveDataUrlImage(dataUrl: string): { url: string } | { error: string } {
+  const match = /^data:(image\/[a-z]+);base64,([A-Za-z0-9+/=\s]+)$/i.exec(dataUrl);
+  if (!match) return { error: "Format d'image non reconnu." };
+  const ext = IMAGE_TYPES[match[1].toLowerCase()];
+  if (!ext) return { error: "Formats acceptés : JPEG, PNG, WebP." };
+  const bytes = Buffer.from(match[2].replace(/\s/g, ""), "base64");
+  if (bytes.length === 0) return { error: "Image vide." };
+  if (bytes.length > MAX_IMAGE_BYTES) return { error: "Image trop lourde (3 Mo maximum)." };
+  // Nom unique et non devinable : l'URL ne révèle rien de l'original.
+  const name = `${Date.now().toString(36)}-${crypto.randomBytes(6).toString("hex")}.${ext}`;
+  fs.writeFileSync(path.join(UPLOADS_DIR, name), bytes);
+  return { url: `/uploads/${name}` };
+}
+
+/** Supprime le fichier d'une image locale (/uploads/…) ; ignore les URLs externes. */
+function deleteUploadedImage(url: string) {
+  const name = /^\/uploads\/([A-Za-z0-9._-]+)$/.exec(url)?.[1];
+  if (!name) return;
+  try { fs.unlinkSync(path.join(UPLOADS_DIR, name)); } catch { /* déjà absent */ }
+}
+
+// Migration : photos historiques stockées en base64 dans SQLite → fichiers.
+{
+  const rows = db.prepare("SELECT id, url FROM gallery WHERE url LIKE 'data:image/%'").all() as Array<{ id: number; url: string }>;
+  let migrated = 0;
+  for (const row of rows) {
+    const saved = saveDataUrlImage(row.url);
+    if ("url" in saved) {
+      db.prepare("UPDATE gallery SET url = ? WHERE id = ?").run(saved.url, row.id);
+      migrated++;
+    } else {
+      console.warn(`[galerie] Photo #${row.id} non migrée (${saved.error}) — supprimée.`);
+      db.prepare("DELETE FROM gallery WHERE id = ?").run(row.id);
+    }
+  }
+  if (migrated) console.log(`[galerie] ${migrated} photo(s) migrée(s) de la base vers ${UPLOADS_DIR}.`);
 }
 
 // Migration : consentement du client à recevoir un rappel (case cochée dans le tunnel).
@@ -1332,28 +1384,52 @@ async function startServer() {
     }
   });
 
+  // Ajout d'une photo : data URL (image redimensionnée par le navigateur) → fichier
+  // dans uploads/. Une URL http(s) externe est acceptée telle quelle.
   app.post("/api/gallery", requireAdmin, (req, res) => {
-    const { url, caption } = req.body;
-    if (!url) return res.status(400).json({ error: "URL is required" });
+    const { url, caption } = req.body ?? {};
+    if (typeof url !== "string" || !url) return res.status(400).json({ error: "Image manquante." });
+    const label = typeof caption === "string" ? caption.trim().slice(0, 200) : "";
+
+    let publicUrl: string;
+    if (url.startsWith("data:")) {
+      const saved = saveDataUrlImage(url);
+      if ("error" in saved) return res.status(400).json({ error: saved.error });
+      publicUrl = saved.url;
+    } else if (/^https?:\/\/\S+$/.test(url) && url.length <= 2000) {
+      publicUrl = url;
+    } else {
+      return res.status(400).json({ error: "Image ou URL invalide." });
+    }
 
     try {
-      const stmt = db.prepare("INSERT INTO gallery (url, caption) VALUES (?, ?)");
-      const info = stmt.run(url, caption || "");
-      res.json({ id: info.lastInsertRowid, url, caption });
+      const info = db.prepare("INSERT INTO gallery (url, caption) VALUES (?, ?)").run(publicUrl, label);
+      res.status(201).json({ id: info.lastInsertRowid, url: publicUrl, caption: label });
     } catch (error) {
-      res.status(500).json({ error: "Failed to add image to gallery" });
+      deleteUploadedImage(publicUrl);
+      res.status(500).json({ error: "Impossible d'enregistrer la photo." });
     }
   });
 
   app.delete("/api/gallery/:id", requireAdmin, (req, res) => {
-    const { id } = req.params;
+    const row = db.prepare("SELECT url FROM gallery WHERE id = ?").get(req.params.id) as { url: string } | undefined;
+    if (!row) return res.status(404).json({ error: "Photo introuvable." });
     try {
-      db.prepare("DELETE FROM gallery WHERE id = ?").run(id);
+      db.prepare("DELETE FROM gallery WHERE id = ?").run(req.params.id);
+      deleteUploadedImage(row.url);
       res.json({ success: true });
     } catch (error) {
-      res.status(500).json({ error: "Failed to delete image from gallery" });
+      res.status(500).json({ error: "Impossible de supprimer la photo." });
     }
   });
+
+  // Photos de la galerie : noms uniques → cache long. Servi dans tous les modes.
+  app.use("/uploads", express.static(UPLOADS_DIR, {
+    index: false,
+    dotfiles: "deny",
+    maxAge: "365d",
+    immutable: true,
+  }));
 
   // Vite middleware for development
   if (IS_TEST) {
