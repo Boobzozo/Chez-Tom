@@ -10,9 +10,9 @@ Le site est un unique serveur Node : pas de base de données externe à installe
 - Node.js 20+ sur le VPS
 
 ```bash
-# Sur le VPS — installer Node 20 (si absent)
+# Sur le VPS — installer Node 20 (si absent) et sqlite3 (pour les sauvegardes)
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
+sudo apt-get install -y nodejs sqlite3
 ```
 
 ## 1. Récupérer le projet
@@ -21,7 +21,7 @@ sudo apt-get install -y nodejs
 cd /var/www
 git clone https://github.com/Boobzozo/Chez-Tom.git chez-tom
 cd chez-tom
-npm install
+npm ci
 ```
 
 ## 2. Configurer
@@ -33,10 +33,20 @@ nano .env
 
 ```ini
 PORT=3000
+TZ=Europe/Paris
 APP_URL="https://votre-domaine.fr"
-GOOGLE_CLIENT_ID="…"        # si intégration Google Calendar
+
+# E-mail de confirmation (facultatif) — domaine vérifié chez Resend obligatoire
+RESEND_API_KEY="re_…"
+MAIL_FROM="Tom Barber <rendez-vous@votre-domaine.fr>"
+
+# Google Calendar (facultatif)
+GOOGLE_CLIENT_ID="…"
 GOOGLE_CLIENT_SECRET="…"
-RESEND_API_KEY=""           # vide si l'email part de n8n
+
+# n8n (facultatif) — vides = désactivés
+N8N_BOOKING_WEBHOOK_URL="https://votre-n8n/webhook/reservation-chez-tom"
+N8N_TELEGRAM_WEBHOOK_URL="https://votre-n8n/webhook/notification-telegram"
 ```
 
 Puis remplacer `https://tom-barber.fr` par votre domaine dans
@@ -44,17 +54,20 @@ Puis remplacer `https://tom-barber.fr` par votre domaine dans
 
 ## 3. Build + lancement avec PM2
 
-PM2 garde le site en vie et le relance au reboot :
+PM2 garde le site en vie et le relance au reboot. Le fichier `ecosystem.config.cjs` fixe le
+dossier de travail et le fuseau horaire, quel que soit l'endroit d'où PM2 est lancé.
 
 ```bash
 sudo npm install -g pm2
 npm run build
-pm2 start npm --name chez-tom -- start
+pm2 start ecosystem.config.cjs
 pm2 save
 pm2 startup          # suivre l'instruction affichée
 ```
 
 Vérifier : `curl http://localhost:3000/api/health` → `{"status":"ok", …}`.
+Le log de démarrage (`pm2 logs tom-barber`) récapitule la configuration active (base, photos,
+fuseau, webhooks, e-mail) et avertit si `MAIL_FROM` est encore le bac à sable Resend.
 
 ## 4. Nginx + HTTPS
 
@@ -68,6 +81,9 @@ server {
     listen 80;
     server_name votre-domaine.fr www.votre-domaine.fr;
 
+    # Envoi des photos de la galerie (JSON ≈ 4 Mo max) — sinon erreur 413
+    client_max_body_size 6m;
+
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
@@ -75,6 +91,8 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
+        # IP réelle du visiteur : indispensable au rate limiting (le serveur fait confiance
+        # à ce proxy via `trust proxy`)
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -91,22 +109,25 @@ sudo certbot --nginx -d votre-domaine.fr -d www.votre-domaine.fr   # HTTPS autom
 ## 5. n8n (facultatif — notifications & agenda)
 
 Les créneaux sont calculés **par le site lui-même** (aucune dépendance externe).
-n8n ne sert plus qu'aux à-côtés après réservation :
+n8n ne sert qu'aux à-côtés après réservation :
 
-| Webhook | Rôle | Appelé depuis |
-|---|---|---|
-| `reservation-chez-tom` | Google Agenda + Google Sheets + email de confirmation | `server.ts` |
+| Variable `.env` | Rôle |
+|---|---|
+| `N8N_BOOKING_WEBHOOK_URL` | Google Agenda + Google Sheets + e-mail de confirmation |
+| `N8N_TELEGRAM_WEBHOOK_URL` | Message Telegram au gérant à chaque réservation |
 
-Si vous l'utilisez : recréez le workflow sur votre instance, **activez**-le, et remplacez
-l'URL dans `server.ts`. Le payload transmet notamment `customer_name`, `customer_email`,
-`customer_phone`, `service_type`, `duration`, `price`, `start_time`, `end_time`.
-Sans compte Google, remplacez le nœud Gmail par un nœud SMTP (email) et supprimez
+Si vous les utilisez : recréez les workflows sur votre instance, **activez**-les, et renseignez
+les URL dans `.env`. Le payload transmet notamment `booking_id`, `customer_name`, `customer_email`,
+`customer_phone`, `service_id`, `service_type`, `duration`, `price`, `start_time`, `end_time`,
+`sms_opt_in`, `formatted_date`, `formatted_time`.
+Sans compte Google, remplacez le nœud Gmail par un nœud SMTP (e-mail) et supprimez
 les nœuds Google Agenda/Sheets — ou n'utilisez pas n8n du tout.
 
 ## 6. Après la mise en ligne
 
-1. Se connecter à l'espace gérant sur `https://votre-domaine.fr/admin` et **changer le mot de passe** (`admin123`).
-2. Renseigner prestations, horaires et galerie depuis l'espace gérant.
+1. Se connecter à l'espace gérant sur `https://votre-domaine.fr/admin` avec `admin123` :
+   le site **impose de choisir un nouveau mot de passe** avant d'aller plus loin.
+2. Renseigner prestations, horaires, horizon de réservation et galerie depuis l'espace gérant.
 3. Lier Google Calendar (bouton dans Configuration) si souhaité — nécessite
    `APP_URL`, `GOOGLE_CLIENT_ID` et `GOOGLE_CLIENT_SECRET`, et l'URL de redirection
    `https://votre-domaine.fr/auth/google/callback` déclarée dans la console Google Cloud.
@@ -118,26 +139,38 @@ les nœuds Google Agenda/Sheets — ou n'utilisez pas n8n du tout.
      en l'ajoutant à son Google Agenda depuis son téléphone). Pour qu'un événement perso
      ne bloque PAS, le marquer « Disponible » dans Google Agenda. Astuce : utiliser un
      agenda Google dédié (sélectionnable dans Configuration) pour séparer perso et salon.
-4. Déclarer le site sur [Google Search Console](https://search.google.com/search-console)
+4. Envoyer une réservation de test depuis le site et vérifier l'e-mail reçu (Resend) et,
+   le cas échéant, l'agenda, le tableur et Telegram (n8n).
+5. Déclarer le site sur [Google Search Console](https://search.google.com/search-console)
    et soumettre `https://votre-domaine.fr/sitemap.xml`.
-5. Créer la fiche [Google Business Profile](https://business.google.com) du salon
+6. Créer la fiche [Google Business Profile](https://business.google.com) du salon
    (indispensable pour le référencement local) avec les mêmes nom/adresse/téléphone que le site.
 
 ## Sauvegardes
 
-Toutes les données vivent dans **un seul fichier** : `chez-tom.db`.
+Deux choses à sauvegarder : la base **`chez-tom.db`** (réservations, réglages, jeton Google)
+et le dossier **`uploads/`** (photos de la galerie).
+
+Ne copiez pas la base avec `cp` pendant que le site tourne : le fichier peut être capturé
+au milieu d'une écriture. Utilisez la commande `.backup` de SQLite, qui produit une copie cohérente.
 
 ```bash
-# Sauvegarde quotidienne à 3h00 (crontab -e)
-0 3 * * * cp /var/www/chez-tom/chez-tom.db /var/backups/chez-tom-$(date +\%u).db
+# Sauvegarde quotidienne à 3h00, 7 jours glissants (crontab -e)
+0 3 * * * sqlite3 /var/www/chez-tom/chez-tom.db ".backup '/var/backups/chez-tom-$(date +\%u).db'" && tar -czf /var/backups/chez-tom-uploads-$(date +\%u).tgz -C /var/www/chez-tom uploads
 ```
+
+Restauration : arrêter le site (`pm2 stop tom-barber`), remettre le `.db` et le dossier
+`uploads/` en place, relancer (`pm2 start tom-barber`).
 
 ## Mise à jour du site
 
 ```bash
 cd /var/www/chez-tom
 git pull
-npm install
+npm ci
 npm run build
-pm2 restart chez-tom
+pm2 restart tom-barber
 ```
+
+Les migrations de base (nouvelles colonnes, nouveaux réglages, photos déplacées en fichiers)
+s'appliquent automatiquement au démarrage.
