@@ -2,7 +2,7 @@ import React from 'react';
 import { Check } from 'lucide-react';
 import type { Service } from '../../types';
 import { Stepper, StepDef } from '../Stepper';
-import { StepHeader, BackButton, PrimaryCTA } from '../parts';
+import { StepHeader, BackButton, PrimaryCTA, StepActions } from '../parts';
 
 export interface ContactValues {
   firstName: string;
@@ -94,9 +94,9 @@ export const ContactStep = ({
         <div className="font-serif text-xl text-white mt-1.5">{recapLine}</div>
       </div>
       {service && (
-        <div className="text-right">
+        <div className="text-right shrink-0 pl-4">
           <div className="font-serif text-3xl text-white">{service.price}€</div>
-          <div className="text-[10px] tracking-widest text-white/35 mt-0.5">{service.duration} minutes</div>
+          <div className="text-[10px] tracking-widest text-white/35 mt-0.5 whitespace-nowrap">{service.duration} min</div>
         </div>
       )}
     </div>
@@ -145,11 +145,10 @@ export const ContactStep = ({
       </div>
     )}
 
-    <div className="flex justify-between items-center">
-      <BackButton onClick={onBack} />
+    <StepActions secondary={<BackButton onClick={onBack} />}>
       <PrimaryCTA onClick={onSubmit} disabled={!canSubmit || submitting}>
         {submitting ? 'Confirmation…' : 'Confirmer ma réservation'}
       </PrimaryCTA>
-    </div>
+    </StepActions>
   </div>
 );

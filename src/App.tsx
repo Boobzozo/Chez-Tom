@@ -69,11 +69,12 @@ const Navbar = ({ isAdmin }: { isAdmin: boolean }) => {
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="absolute top-full left-0 right-0 bg-paper border-b border-dark/5 p-6 flex flex-col space-y-4 text-center md:hidden"
+            className="absolute top-full left-0 right-0 bg-paper border-b border-dark/5 px-6 py-3 flex flex-col text-center md:hidden"
           >
-            <a href="#services" onClick={() => setIsOpen(false)}>Services</a>
-            <a href="#booking" onClick={() => setIsOpen(false)}>Réservation</a>
-            <a href="#contact" onClick={() => setIsOpen(false)}>Contact</a>
+            {/* Zones de toucher d'au moins 44 px de haut */}
+            <a href="#services" className="block py-3" onClick={() => setIsOpen(false)}>Services</a>
+            <a href="#booking" className="block py-3" onClick={() => setIsOpen(false)}>Réservation</a>
+            <a href="#contact" className="block py-3" onClick={() => setIsOpen(false)}>Contact</a>
           </motion.div>
         )}
       </AnimatePresence>
@@ -104,9 +105,9 @@ const Hero = () => (
       <motion.span 
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="text-xs uppercase tracking-[0.3em] font-semibold text-gold mb-6 block"
+        className="text-xs uppercase tracking-[0.2em] md:tracking-[0.3em] font-semibold text-gold mb-6 block"
       >
-        Barbier · Coiffeur — Martigné-sur-Mayenne
+        Barbier · Coiffeur — <span className="whitespace-nowrap">Martigné-sur-Mayenne</span>
       </motion.span>
       <motion.h1 
         initial={{ opacity: 0, y: 20 }}
@@ -239,9 +240,9 @@ const Services = ({ services, categories }: { services: Service[], categories: C
               <motion.a
                 whileTap={{ scale: 0.98 }}
                 href="#booking"
-                className="inline-flex items-center justify-center gap-6 bg-dark text-paper px-10 md:px-12 py-5 md:py-6 rounded-none text-[11px] md:text-xs uppercase tracking-[0.5em] font-black transition-all duration-500 group relative overflow-hidden"
+                className="inline-flex items-center justify-center gap-4 md:gap-6 bg-dark text-paper px-8 md:px-12 py-5 md:py-6 rounded-none text-[11px] md:text-xs uppercase tracking-[0.25em] md:tracking-[0.5em] font-black transition-all duration-500 group relative overflow-hidden"
               >
-                <span className="relative z-10">Réserver votre créneau</span>
+                <span className="relative z-10 whitespace-nowrap">Réserver votre créneau</span>
                 <ChevronRight size={18} className="relative z-10 group-hover:translate-x-2 transition-transform duration-500" />
                 <div className="absolute inset-0 bg-gold translate-y-full group-hover:translate-y-0 transition-transform duration-500"></div>
               </motion.a>

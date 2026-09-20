@@ -154,7 +154,7 @@ const GalleryManager = () => {
   };
 
   return (
-    <div className="glass-card rounded-[4px] p-8">
+    <div className="glass-card rounded-[4px] p-5 md:p-8">
       <h3 className="text-xl font-serif mb-6 flex items-center gap-2">
         <Instagram size={20} /> Gestion de la Galerie
       </h3>
@@ -283,7 +283,7 @@ const CategoryManager = ({ categories, fetchCategories }: { categories: Category
   };
 
   return (
-    <div className="glass-card rounded-[4px] p-8">
+    <div className="glass-card rounded-[4px] p-5 md:p-8">
       <div className="flex justify-between items-center mb-6">
         <h3 className="text-xl font-serif flex items-center gap-2">
           <Settings size={20} /> Catégories de Prestations
@@ -663,7 +663,8 @@ const AdminDashboard = ({
           <h1 className="text-5xl font-serif mb-2">Espace Gérant</h1>
           <p className="text-dark/40 uppercase tracking-widest text-xs">Gestion du salon & calendrier</p>
         </div>
-        <div className="flex gap-4">
+        {/* Sur téléphone, les actions passent à la ligne au lieu de forcer la largeur de la page. */}
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
           {/* Notifications Bell */}
           <div className="relative">
             <button 
@@ -746,8 +747,8 @@ const AdminDashboard = ({
 
       <div className="grid lg:grid-cols-12 gap-8">
         {/* Sidebar Settings */}
-        <div className="lg:col-span-4 space-y-8">
-          <div className="glass-card rounded-[4px] p-8">
+        <div className="lg:col-span-4 space-y-8 min-w-0">
+          <div className="glass-card rounded-[4px] p-5 md:p-8">
             <h3 className="text-xl font-serif mb-6 flex items-center gap-2">
               <Settings size={20} /> Configuration
             </h3>
@@ -803,12 +804,14 @@ const AdminDashboard = ({
                     value={newPassword}
                     onChange={(e) => { setNewPassword(e.target.value); setPasswordMsg(null); }}
                     placeholder="Nouveau mot de passe (8 caractères min.)"
-                    className="flex-1 bg-dark/5 rounded-[3px] px-3 py-2 text-xs outline-none focus:bg-gold/10"
+                    // min-w-0 : sans ça, la largeur minimale intrinsèque du champ
+                    // fait déborder la carte sur téléphone.
+                    className="flex-1 min-w-0 bg-dark/5 rounded-[3px] px-3 py-2 text-xs outline-none focus:bg-gold/10"
                   />
                   <button
                     onClick={changePassword}
                     disabled={newPassword.length < 8}
-                    className="btn-primary py-2 px-4 text-[10px] disabled:opacity-30"
+                    className="btn-primary py-2 px-4 text-[10px] disabled:opacity-30 shrink-0"
                   >
                     Modifier
                   </button>
@@ -861,7 +864,7 @@ const AdminDashboard = ({
                   <select 
                     value={settings?.google_calendar_id || 'primary'}
                     onChange={(e) => updateSetting('google_calendar_id', e.target.value)}
-                    className="w-full bg-white border border-dark/10 py-2 px-3 rounded-[3px] text-sm outline-none focus:border-gold"
+                    className="w-full min-w-0 bg-white border border-dark/10 py-2 px-3 rounded-[3px] text-sm outline-none focus:border-gold"
                   >
                     <option value="primary">Agenda Principal</option>
                     {calendars.map(cal => (
@@ -876,7 +879,7 @@ const AdminDashboard = ({
             </div>
           </div>
 
-          <div className="glass-card rounded-[4px] p-8">
+          <div className="glass-card rounded-[4px] p-5 md:p-8">
             <h3 className="text-xl font-serif mb-6 flex items-center gap-2">
               <Clock size={20} /> Horaires d'ouverture
             </h3>
@@ -947,7 +950,7 @@ const AdminDashboard = ({
 
           <CategoryManager categories={categories} fetchCategories={fetchCategories} />
 
-          <div className="glass-card rounded-[4px] p-8">
+          <div className="glass-card rounded-[4px] p-5 md:p-8">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-serif flex items-center gap-2">
                 <Scissors size={20} /> Gestion des Services
@@ -988,7 +991,7 @@ const AdminDashboard = ({
                           const val = parseFloat(e.target.value);
                           handleServiceChange(index, 'price', isNaN(val) ? 0 : val);
                         }}
-                        className="w-full bg-dark/5 rounded-lg px-3 py-2 text-xs outline-none focus:bg-gold/10"
+                        className="w-full min-w-0 bg-dark/5 rounded-lg px-3 py-2 text-xs outline-none focus:bg-gold/10"
                       />
                     </div>
                     <div className="space-y-1">
@@ -1001,7 +1004,7 @@ const AdminDashboard = ({
                           const val = parseInt(e.target.value);
                           handleServiceChange(index, 'duration', isNaN(val) ? 0 : val);
                         }}
-                        className="w-full bg-dark/5 rounded-lg px-3 py-2 text-xs outline-none focus:bg-gold/10"
+                        className="w-full min-w-0 bg-dark/5 rounded-lg px-3 py-2 text-xs outline-none focus:bg-gold/10"
                       />
                     </div>
                   </div>
@@ -1010,7 +1013,7 @@ const AdminDashboard = ({
                     <select 
                       value={service.category_id || ''}
                       onChange={(e) => handleServiceChange(index, 'category_id', e.target.value)}
-                      className="w-full bg-dark/5 rounded-lg px-3 py-2 text-xs outline-none focus:bg-gold/10"
+                      className="w-full min-w-0 bg-dark/5 rounded-lg px-3 py-2 text-xs outline-none focus:bg-gold/10"
                     >
                       <option value="">Sans catégorie</option>
                       {categories.map(cat => (
@@ -1025,7 +1028,7 @@ const AdminDashboard = ({
                       onChange={(e) => handleServiceChange(index, 'description', e.target.value)}
                       placeholder="Ex. Rasoir traditionnel, serviette chaude"
                       rows={2}
-                      className="w-full bg-dark/5 rounded-lg px-3 py-2 text-xs outline-none focus:bg-gold/10 resize-none"
+                      className="w-full min-w-0 bg-dark/5 rounded-lg px-3 py-2 text-xs outline-none focus:bg-gold/10 resize-none"
                     />
                   </div>
                 </div>
@@ -1039,7 +1042,7 @@ const AdminDashboard = ({
             </div>
           </div>
 
-          <div className="glass-card rounded-[4px] p-8">
+          <div className="glass-card rounded-[4px] p-5 md:p-8">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-serif flex items-center gap-2">
                 <Calendar size={20} /> Aujourd'hui
@@ -1116,7 +1119,7 @@ const AdminDashboard = ({
         </div>
 
         {/* Main Calendar View */}
-        <div className="lg:col-span-8 space-y-8">
+        <div className="lg:col-span-8 space-y-8 min-w-0">
           <GalleryManager />
           
           <div className="glass-card rounded-[4px] p-4 md:p-8 admin-calendar">

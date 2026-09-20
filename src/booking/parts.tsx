@@ -28,7 +28,7 @@ export const BackButton = ({ onClick }: { onClick: () => void }) => (
   </button>
 );
 
-/** CTA primaire noir avec accent doré à droite. */
+/** CTA primaire noir avec accent doré à droite. Pleine largeur sur mobile. */
 export const PrimaryCTA = ({
   children,
   onClick,
@@ -40,8 +40,25 @@ export const PrimaryCTA = ({
   disabled?: boolean;
   type?: 'button' | 'submit';
 }) => (
-  <button type={type} onClick={onClick} disabled={disabled} className="btn-primary">
+  <button type={type} onClick={onClick} disabled={disabled} className="btn-primary w-full sm:w-auto">
     {children}
     <span className="w-4 h-px bg-gold" />
   </button>
+);
+
+/**
+ * Rangée de bas d'étape : sur mobile, le CTA passe en pleine largeur au-dessus
+ * de l'élément secondaire (Retour, note) ; à partir de 640 px, les deux se font face.
+ */
+export const StepActions = ({
+  secondary,
+  children,
+}: {
+  secondary?: React.ReactNode;
+  children: React.ReactNode;
+}) => (
+  <div className="flex flex-col-reverse gap-5 sm:flex-row sm:justify-between sm:items-center">
+    <div className="flex justify-center sm:justify-start">{secondary}</div>
+    {children}
+  </div>
 );

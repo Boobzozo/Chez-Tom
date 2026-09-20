@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Category } from '../../types';
 import { Stepper, StepDef } from '../Stepper';
-import { StepHeader, PrimaryCTA } from '../parts';
+import { StepHeader, PrimaryCTA, StepActions } from '../parts';
 
 /** Indice d'âge pour les profils connus — sinon rien (catégories personnalisées). */
 const ageHint = (name: string): string | undefined => {
@@ -84,13 +84,16 @@ export const ProfileStep = ({
       )}
     </div>
 
-    <div className="flex justify-between items-center">
-      <span className="text-xs text-muted-deep tracking-wide">
-        Étape 1 sur 4 · environ 60 secondes
-      </span>
+    <StepActions
+      secondary={
+        <span className="text-xs text-muted-deep tracking-wide">
+          Étape 1 sur 4 · environ 60 secondes
+        </span>
+      }
+    >
       <PrimaryCTA onClick={onContinue} disabled={!canContinue}>
         Continuer
       </PrimaryCTA>
-    </div>
+    </StepActions>
   </div>
 );

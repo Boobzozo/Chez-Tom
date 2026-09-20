@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Service } from '../../types';
 import { Stepper, StepDef } from '../Stepper';
-import { StepHeader, BackButton, PrimaryCTA } from '../parts';
+import { StepHeader, BackButton, PrimaryCTA, StepActions } from '../parts';
 
 export interface DayCell {
   dateStr: string;
@@ -138,7 +138,7 @@ export const SlotStep = ({
       {/* Navigation par semaine + mois affiché */}
       <div className="flex items-center justify-between mb-4">
         <WeekArrow direction="prev" disabled={!canGoPrev} onClick={onPrevWeek} />
-        <span className="font-serif text-xl text-ink-soft" aria-live="polite">{monthLabel}</span>
+        <span className="font-serif text-lg sm:text-xl text-ink-soft text-center px-2" aria-live="polite">{monthLabel}</span>
         <WeekArrow direction="next" disabled={!canGoNext} onClick={onNextWeek} />
       </div>
 
@@ -207,12 +207,11 @@ export const SlotStep = ({
         </div>
       )}
 
-      <div className="flex justify-between items-center">
-        <BackButton onClick={onBack} />
+      <StepActions secondary={<BackButton onClick={onBack} />}>
         <PrimaryCTA onClick={onConfirm} disabled={!selectedTime}>
           Confirmer le créneau
         </PrimaryCTA>
-      </div>
+      </StepActions>
     </div>
   );
 };

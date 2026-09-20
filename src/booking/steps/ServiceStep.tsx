@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Service } from '../../types';
 import { Stepper, StepDef } from '../Stepper';
-import { StepHeader, BackButton, PrimaryCTA } from '../parts';
+import { StepHeader, BackButton, PrimaryCTA, StepActions } from '../parts';
 
 const ServiceRow = ({
   service,
@@ -75,11 +75,10 @@ export const ServiceStep = ({
       )}
     </div>
 
-    <div className="flex justify-between items-center">
-      <BackButton onClick={onBack} />
+    <StepActions secondary={<BackButton onClick={onBack} />}>
       <PrimaryCTA onClick={onContinue} disabled={selectedId === null}>
         {selectedPrice !== null ? `Continuer · ${selectedPrice}€` : 'Continuer'}
       </PrimaryCTA>
-    </div>
+    </StepActions>
   </div>
 );
