@@ -58,4 +58,8 @@ export interface AppSettings {
   opening_hours?: string; // JSON string
   google_calendar_id?: string;
   notification_email?: string;
+  /** Semaines réservables à l'avance (chaîne, ex. "4"). */
+  booking_horizon_weeks?: string;
+  /** "true" si le serveur envoie un e-mail de confirmation (calculé, non modifiable). */
+  email_confirmation?: string;
 }

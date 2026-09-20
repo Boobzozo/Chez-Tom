@@ -12,9 +12,10 @@ export const StepHeader = ({
 }) => (
   <div className="mb-8">
     <div className="mono-label text-gold-deep mb-3">{eyebrow}</div>
-    <h1 className="font-serif font-normal text-4xl md:text-5xl text-ink-soft leading-[1.05] m-0">
+    {/* h2 : le seul h1 de la page est celui du hero. */}
+    <h2 className="font-serif font-normal text-4xl md:text-5xl text-ink-soft leading-[1.05] m-0">
       {title}
-    </h1>
+    </h2>
     {sub && <p className="text-sm text-muted-deep mt-3 max-w-md leading-relaxed">{sub}</p>}
   </div>
 );

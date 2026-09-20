@@ -7,6 +7,7 @@ export const Confirmation = ({
   recapLine,
   address,
   calendarUrl,
+  email,
   onReset,
 }: {
   firstName: string;
@@ -14,6 +15,8 @@ export const Confirmation = ({
   recapLine: string; // "Coupe + Barbe · Mercredi 7 mai à 14h30"
   address: string;
   calendarUrl?: string;
+  /** Adresse à laquelle un e-mail de confirmation part — absent si le site n'en envoie pas. */
+  email?: string;
   onReset: () => void;
 }) => (
   <div className="bg-dark px-6 py-16 md:py-24 flex items-center justify-center" style={{ borderRadius: 'var(--radius-md)' }}>
@@ -28,8 +31,12 @@ export const Confirmation = ({
       </h2>
       <p className="text-sm text-white/50 leading-relaxed mt-6">
         {recapLine}
-        <br />
-        Un rappel vous sera envoyé avant le rendez-vous.
+        {email && (
+          <>
+            <br />
+            Un e-mail de confirmation part à {email}.
+          </>
+        )}
       </p>
 
       <div className="mt-10 px-7 py-6 border border-white/10 flex flex-col sm:flex-row gap-4 justify-between items-center">

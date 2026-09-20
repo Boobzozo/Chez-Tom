@@ -35,19 +35,36 @@ const Navbar = ({ isAdmin }: { isAdmin: boolean }) => {
           <span className="lead">T</span><span className="ltr">o</span><span className="ltr">m</span><span className="ltr sp"> </span><span className="lead">B</span><span className="ltr">a</span><span className="ltr">r</span><span className="ltr">b</span><span className="ltr">e</span><span className="ltr">r</span>
         </a>
         
-        <div className={`hidden md:flex items-center space-x-8 text-xs uppercase tracking-widest font-medium transition-colors duration-500 ${scrolled ? 'text-dark' : 'text-paper'}`}>
-          <a href="#services" className="hover:text-gold transition-colors">Services</a>
-          <a href="#booking" className="hover:text-gold transition-colors">Réservation</a>
-          <a href="#contact" className="hover:text-gold transition-colors">Contact</a>
-        </div>
+        {/* Espace gérant : les ancres du site public n'ont pas de sens ici. */}
+        {isAdmin ? (
+          <a
+            href="/"
+            className={`text-xs uppercase tracking-widest font-medium transition-colors hover:text-gold ${scrolled ? 'text-dark' : 'text-paper'}`}
+          >
+            Voir le site
+          </a>
+        ) : (
+          <>
+            <div className={`hidden md:flex items-center space-x-8 text-xs uppercase tracking-widest font-medium transition-colors duration-500 ${scrolled ? 'text-dark' : 'text-paper'}`}>
+              <a href="#services" className="hover:text-gold transition-colors">Services</a>
+              <a href="#booking" className="hover:text-gold transition-colors">Réservation</a>
+              <a href="#contact" className="hover:text-gold transition-colors">Contact</a>
+            </div>
 
-        <button className={`md:hidden transition-colors ${scrolled ? 'text-dark' : 'text-paper'}`} onClick={() => setIsOpen(!isOpen)}>
-          {isOpen ? <X /> : <Menu />}
-        </button>
+            <button
+              className={`md:hidden transition-colors ${scrolled ? 'text-dark' : 'text-paper'}`}
+              onClick={() => setIsOpen(!isOpen)}
+              aria-label={isOpen ? 'Fermer le menu' : 'Ouvrir le menu'}
+              aria-expanded={isOpen}
+            >
+              {isOpen ? <X /> : <Menu />}
+            </button>
+          </>
+        )}
       </div>
 
       <AnimatePresence>
-        {isOpen && (
+        {isOpen && !isAdmin && (
           <motion.div 
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -203,8 +220,8 @@ const Services = ({ services, categories }: { services: Service[], categories: C
                             <div className="hidden sm:block h-px bg-dark/5 flex-1 mx-6 border-t border-dashed border-dark/15 group-hover:border-gold/30 transition-colors"></div>
                             <span className="text-xl md:text-3xl font-serif text-gold tabular-nums tracking-tighter shrink-0">{service.price}€</span>
                           </div>
-                          <p className="text-[9px] md:text-[10px] font-sans font-bold text-dark/25 uppercase tracking-[0.3em] leading-relaxed">
-                            Prestation de précision
+                          <p className="text-xs md:text-sm text-dark/50 leading-relaxed">
+                            {service.description ? `${service.description} · ` : ''}{service.duration} min
                           </p>
                         </div>
                       </div>
@@ -743,7 +760,13 @@ function AppContent() {
 
       {settings?.show_gallery === 'true' && <Gallery />}
 
-      <BookingSection services={services} categories={categories} openingHours={mainOpeningHours} />
+      <BookingSection
+        services={services}
+        categories={categories}
+        openingHours={mainOpeningHours}
+        horizonWeeks={parseInt(settings.booking_horizon_weeks ?? '', 10) || undefined}
+        emailConfirmation={settings.email_confirmation === 'true'}
+      />
 
       {settings?.show_about === 'true' && (
         <section className="py-32 px-6 bg-white overflow-hidden">

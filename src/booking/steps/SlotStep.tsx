@@ -8,6 +8,7 @@ export interface DayCell {
   weekday: string; // "LUN"
   dayNum: number;
   closed: boolean;
+  past: boolean;
   weekdayIndex: number; // 1 = lundi … 6 = samedi (dimanche exclu)
 }
 
@@ -23,6 +24,7 @@ const TimeChip = ({
   <button
     type="button"
     onClick={onClick}
+    aria-pressed={active}
     className={`py-3 text-sm font-medium transition-colors duration-150 border ${
       active ? 'bg-dark text-white border-dark' : 'bg-white text-ink-soft border-hairline hover:border-dark'
     }`}
@@ -56,10 +58,44 @@ const SlotGrid = ({
   );
 };
 
+/** Flèche de navigation entre semaines : filet + chevron, dans l'esprit des boutons du tunnel. */
+const WeekArrow = ({
+  direction,
+  disabled,
+  onClick,
+}: {
+  direction: 'prev' | 'next';
+  disabled: boolean;
+  onClick: () => void;
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    aria-label={direction === 'prev' ? 'Semaine précédente' : 'Semaine suivante'}
+    className="w-10 h-10 flex items-center justify-center border border-hairline bg-white text-ink-soft hover:border-dark transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-hairline"
+    style={{ borderRadius: 'var(--radius-xs)' }}
+  >
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <path
+        d={direction === 'prev' ? 'M9 2 4 7l5 5' : 'M5 2l5 5-5 5'}
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  </button>
+);
+
 export const SlotStep = ({
   steps,
   monthLabel,
   days,
+  canGoPrev,
+  canGoNext,
+  onPrevWeek,
+  onNextWeek,
   selectedDate,
   onSelectDate,
   slots,
@@ -75,6 +111,10 @@ export const SlotStep = ({
   steps: StepDef[];
   monthLabel: string;
   days: DayCell[];
+  canGoPrev: boolean;
+  canGoNext: boolean;
+  onPrevWeek: () => void;
+  onNextWeek: () => void;
   selectedDate: string;
   onSelectDate: (d: string) => void;
   slots: string[];
@@ -92,39 +132,46 @@ export const SlotStep = ({
 
   return (
     <div>
-      <StepHeader
-        title="Choisissez votre créneau"
-        sub={`${monthLabel} · Salon ouvert du lundi au samedi`}
-      />
+      <StepHeader title="Choisissez votre créneau" sub="Salon ouvert du lundi au samedi" />
       <Stepper steps={steps} current={3} />
+
+      {/* Navigation par semaine + mois affiché */}
+      <div className="flex items-center justify-between mb-4">
+        <WeekArrow direction="prev" disabled={!canGoPrev} onClick={onPrevWeek} />
+        <span className="font-serif text-xl text-ink-soft" aria-live="polite">{monthLabel}</span>
+        <WeekArrow direction="next" disabled={!canGoNext} onClick={onNextWeek} />
+      </div>
 
       {/* Calendrier aligné : chaque jour de semaine toujours dans la même colonne (lundi → samedi) */}
       <div className="grid grid-cols-6 gap-1.5 sm:gap-2 mb-9">
         {days.map((d, i) => {
           const active = selectedDate === d.dateStr;
+          const disabled = d.closed || d.past;
           return (
             <button
               key={d.dateStr}
               type="button"
-              disabled={d.closed}
-              onClick={() => !d.closed && onSelectDate(d.dateStr)}
+              disabled={disabled}
+              aria-pressed={active}
+              onClick={() => !disabled && onSelectDate(d.dateStr)}
               // Le premier jour se cale dans sa colonne ; les suivants s'enchaînent naturellement.
               style={{ borderRadius: 'var(--radius-xs)', ...(i === 0 ? { gridColumnStart: d.weekdayIndex } : {}) }}
               className={`py-3.5 flex flex-col items-center transition-colors duration-150 border ${
                 active
                   ? 'bg-dark text-white border-dark'
                   : 'bg-white text-ink-soft border-hairline hover:border-dark'
-              } ${d.closed ? 'opacity-50 cursor-not-allowed hover:border-hairline' : ''}`}
+              } ${disabled ? 'opacity-40 cursor-not-allowed hover:border-hairline' : ''}`}
             >
               <span className="text-[9px] tracking-[0.18em] font-semibold opacity-70">{d.weekday}</span>
               <span className="font-serif text-2xl font-medium mt-0.5">{d.dayNum}</span>
-              {d.closed && <span className="text-[8px] tracking-widest mt-0.5">FERMÉ</span>}
+              {d.closed && !d.past && <span className="text-[8px] tracking-widest mt-0.5">FERMÉ</span>}
             </button>
           );
         })}
       </div>
 
-      {/* Créneaux */}
+      {/* Créneaux — la date est rappelée : le jour choisi peut être sur une autre page de semaines. */}
+      <div className="font-serif text-lg text-ink-soft mb-4">{recapDate}</div>
       {loading ? (
         <p className="slots-loading" aria-live="polite">Chargement des créneaux…</p>
       ) : error ? (

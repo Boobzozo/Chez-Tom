@@ -737,6 +737,26 @@ const AdminDashboard = ({
                 </button>
               </div>
 
+              {/* Horizon de réservation */}
+              <div className="pt-6 border-t border-dark/5 space-y-2">
+                <label htmlFor="horizon-weeks" className="text-[10px] uppercase tracking-widest text-dark/40 font-bold block">
+                  Réservation possible jusqu'à
+                </label>
+                <div className="flex items-center gap-3">
+                  <select
+                    id="horizon-weeks"
+                    value={settings?.booking_horizon_weeks || '4'}
+                    onChange={(e) => updateSetting('booking_horizon_weeks', e.target.value)}
+                    className="bg-white border border-dark/10 py-2 px-3 rounded-[3px] text-sm outline-none focus:border-gold"
+                  >
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                      <option key={n} value={String(n)}>{n} {n > 1 ? 'semaines' : 'semaine'}</option>
+                    ))}
+                  </select>
+                  <span className="text-xs text-muted-deep">à l'avance</span>
+                </div>
+              </div>
+
               {/* Changement du mot de passe admin */}
               <div className="pt-6 border-t border-dark/5 space-y-2">
                 <label className="text-[10px] uppercase tracking-widest text-dark/40 font-bold">
@@ -775,7 +795,9 @@ const AdminDashboard = ({
                     </button>
                     <p className="text-[10px] text-muted-deep leading-tight">
                       Facultatif — le planning et les réservations fonctionnent sans compte Google.
-                      La liaison ajoute simplement une copie de vos rendez-vous dans votre agenda.
+                      Une fois lié : vos rendez-vous sont recopiés dans l'agenda choisi, et <strong>tout événement
+                      de cet agenda bloque les créneaux en ligne</strong> (pratique pour bloquer un créneau depuis
+                      votre téléphone). Un événement marqué « Disponible » ne bloque rien.
                     </p>
                   </>
                 ) : (
@@ -784,7 +806,9 @@ const AdminDashboard = ({
                       <Check size={14} /> Google Calendar Connecté
                     </div>
                     <p className="text-[10px] text-muted-deep leading-tight">
-                      La synchronisation est automatique via votre pont n8n.
+                      Vos réservations sont recopiées dans l'agenda ci-dessous, et <strong>tout événement de cet
+                      agenda bloque les créneaux du site</strong>. Pour qu'un événement ne bloque pas, marquez-le
+                      « Disponible » dans Google Agenda.
                     </p>
                     <button 
                       onClick={connectGoogle}
@@ -810,7 +834,7 @@ const AdminDashboard = ({
                     ))}
                   </select>
                   <p className="text-[10px] text-dark/40 italic">
-                    Cet agenda est enregistré comme source de vérité.
+                    Les événements de cet agenda bloquent les créneaux en ligne.
                   </p>
                 </div>
               )}

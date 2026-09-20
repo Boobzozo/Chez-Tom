@@ -83,7 +83,7 @@ export const ContactStep = ({
     <StepHeader
       eyebrow="Réservation · Dernière étape"
       title="Vos coordonnées"
-      sub="Pour la confirmation et le rappel. Aucune donnée partagée."
+      sub="Pour vous confirmer le rendez-vous et vous joindre en cas d'imprévu. Rien d'autre."
     />
     <Stepper steps={steps} current={4} />
 
@@ -126,7 +126,8 @@ export const ContactStep = ({
         {values.smsOptIn && <Check size={11} color="white" strokeWidth={3} />}
       </span>
       <span className="text-xs text-muted-deep leading-relaxed">
-        J'accepte de recevoir un rappel avant mon rendez-vous. Pas de marketing.
+        J'accepte que le salon me recontacte par SMS ou e-mail au sujet de ce rendez-vous
+        (rappel, imprévu). Jamais de publicité.
       </span>
     </label>
 

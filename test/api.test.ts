@@ -132,6 +132,18 @@ test("réservation : refusée si le créneau est dans le passé", async () => {
   assert.equal(status, 400);
 });
 
+test("réservation : refusée au-delà de l'horizon (4 semaines par défaut)", async () => {
+  const far = new Date(nextMonday);
+  far.setDate(far.getDate() + 7 * 8); // un lundi dans 9 semaines et des poussières
+  const { status, data } = await book({ start_time: `${localDate(far)}T10:00:00` });
+  assert.equal(status, 400);
+  assert.match(data.error, /4 semaines/);
+
+  const settings = await api("GET", "/api/settings");
+  assert.equal(settings.data.booking_horizon_weeks, "4");
+  assert.equal(settings.data.email_confirmation, "false", "ni Resend ni n8n en test");
+});
+
 test("réservation : refusée hors horaires d'ouverture et sur un jour fermé", async () => {
   assert.equal((await book({ start_time: `${MONDAY}T03:00:00` })).status, 409);
   assert.equal((await book({ start_time: `${MONDAY}T18:45:00` })).status, 409, "18:45 + 30 min dépasse 19:00");
@@ -216,7 +228,15 @@ test("réservation : refusée sans token pour les données clients", async () =>
 
 test("réglages publics : aucune donnée sensible", async () => {
   const { data } = await api("GET", "/api/settings");
-  assert.deepEqual(Object.keys(data).sort(), ["opening_hours", "show_about", "show_gallery"]);
+  assert.deepEqual(Object.keys(data).sort(), ["booking_horizon_weeks", "email_confirmation", "opening_hours", "show_about", "show_gallery"]);
+});
+
+test("réglage : l'horizon de réservation est borné (1 à 12 semaines)", async () => {
+  assert.equal((await api("POST", "/api/settings", { key: "booking_horizon_weeks", value: "0" }, adminToken)).status, 400);
+  assert.equal((await api("POST", "/api/settings", { key: "booking_horizon_weeks", value: "13" }, adminToken)).status, 400);
+  assert.equal((await api("POST", "/api/settings", { key: "booking_horizon_weeks", value: "6" }, adminToken)).status, 200);
+  assert.equal((await api("GET", "/api/settings")).data.booking_horizon_weeks, "6");
+  assert.equal((await api("POST", "/api/settings", { key: "booking_horizon_weeks", value: "4" }, adminToken)).status, 200);
 });
 
 test("mot de passe : le défaut doit être remplacé, jamais réutilisé", async () => {

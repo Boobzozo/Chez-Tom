@@ -85,6 +85,7 @@ db.exec(`
 
   INSERT OR IGNORE INTO settings (key, value) VALUES ('show_gallery', 'true');
   INSERT OR IGNORE INTO settings (key, value) VALUES ('show_about', 'true');
+  INSERT OR IGNORE INTO settings (key, value) VALUES ('booking_horizon_weeks', '4');
   INSERT OR IGNORE INTO settings (key, value) VALUES ('admin_password', 'admin123');
   INSERT OR IGNORE INTO settings (key, value) VALUES ('opening_hours', '{"monday":{"open":"09:00","close":"19:00","closed":false},"tuesday":{"open":"09:00","close":"19:00","closed":false},"wednesday":{"open":"09:00","close":"19:00","closed":false},"thursday":{"open":"09:00","close":"19:00","closed":false},"friday":{"open":"09:00","close":"19:00","closed":false},"saturday":{"open":"09:00","close":"18:00","closed":false},"sunday":{"open":"09:00","close":"12:00","closed":true}}');
 
@@ -416,6 +417,14 @@ const slotLabel = (t: number) => `${pad2(Math.floor(t / 60))}:${pad2(t % 60)}`;
 const toLocalIso = (d: Date) =>
   `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}:00`;
 
+/** Nombre de semaines réservables à l'avance (réglage gérant, 1 à 12, 4 par défaut). */
+const DEFAULT_HORIZON_WEEKS = 4;
+function getHorizonWeeks(): number {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'booking_horizon_weeks'").get() as { value: string } | undefined;
+  const n = parseInt(row?.value ?? "", 10);
+  return Number.isInteger(n) && n >= 1 && n <= 12 ? n : DEFAULT_HORIZON_WEEKS;
+}
+
 function getOpeningHours(): Record<string, any> {
   const row = db.prepare("SELECT value FROM settings WHERE key = 'opening_hours'").get() as { value: string } | undefined;
   try { return row ? JSON.parse(row.value) : {}; } catch { return {}; /* horaires illisibles → tout fermé */ }
@@ -646,6 +655,10 @@ async function startServer() {
     }
     if (startDate.getTime() < Date.now() - 60 * 60 * 1000) {
       return res.status(400).json({ error: "Ce créneau est déjà passé." });
+    }
+    const horizonWeeks = getHorizonWeeks();
+    if (startDate.getTime() > Date.now() + (horizonWeeks * 7 + 1) * 24 * 60 * 60 * 1000) {
+      return res.status(400).json({ error: `Les réservations sont ouvertes jusqu'à ${horizonWeeks} semaines à l'avance.` });
     }
     const start_time = `${date}T${slot}:00`;
     const end_time = toLocalIso(new Date(startDate.getTime() + service.duration * 60_000));
@@ -890,11 +903,15 @@ async function startServer() {
   };
 
   // Réglages publics : liste blanche, le reste (agenda Google, etc.) ne sort pas.
-  const PUBLIC_SETTINGS = ["show_gallery", "show_about", "opening_hours"];
+  const PUBLIC_SETTINGS = ["show_gallery", "show_about", "opening_hours", "booking_horizon_weeks"];
+  // Le site enverra-t-il un e-mail de confirmation ? (Resend ou workflow n8n configuré.)
+  // Sert au tunnel pour ne rien promettre qui n'existe pas.
+  const EMAIL_CONFIRMATION = Boolean(resend || N8N_BOOKING_WEBHOOK_URL);
   app.get("/api/settings", (req, res) => {
     const all = readSettings();
     const pub: Record<string, string> = {};
     for (const key of PUBLIC_SETTINGS) if (all[key] !== undefined) pub[key] = all[key];
+    pub.email_confirmation = EMAIL_CONFIRMATION ? "true" : "false";
     res.json(pub);
   });
 
@@ -911,6 +928,13 @@ async function startServer() {
     let stored = value.toString();
     if (key === "admin_password_is_default") {
       return res.status(400).json({ error: "Réglage interne." });
+    }
+    if (key === "booking_horizon_weeks") {
+      const n = parseInt(stored, 10);
+      if (!Number.isInteger(n) || n < 1 || n > 12) {
+        return res.status(400).json({ error: "L'horizon de réservation doit être entre 1 et 12 semaines." });
+      }
+      stored = String(n);
     }
     if (key === "admin_password") {
       if (stored.length < 8) {

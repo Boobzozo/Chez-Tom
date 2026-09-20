@@ -27,16 +27,27 @@ const fmtWeekday = (dateStr: string) => {
   return new Date(y, m - 1, d).toLocaleDateString('fr-FR', { weekday: 'long' });
 };
 
+/** Nombre de semaines réservables à l'avance (réglable dans l'espace gérant). */
+export const DEFAULT_HORIZON_WEEKS = 4;
+/** Semaines affichées en même temps dans la grille des jours. */
+const WEEKS_PER_PAGE = 2;
+
 export const BookingSection = ({
   services,
   categories,
   openingHours,
+  horizonWeeks = DEFAULT_HORIZON_WEEKS,
+  emailConfirmation = false,
 }: {
   services: Service[];
   categories: Category[];
   openingHours: Record<string, DayHours>;
+  horizonWeeks?: number;
+  /** Le serveur enverra-t-il un e-mail de confirmation ? (Resend ou n8n configuré) */
+  emailConfirmation?: boolean;
 }) => {
   const [step, setStep] = useState(1);
+  const [weekOffset, setWeekOffset] = useState(0);
   const [confirmed, setConfirmed] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
@@ -53,6 +64,7 @@ export const BookingSection = ({
   const [error, setError] = useState<string | null>(null);
   const [confirmedInfo, setConfirmedInfo] = useState<{
     firstName: string;
+    email: string;
     dayLabel: string;
     recapLine: string;
     calendarUrl?: string;
@@ -70,22 +82,25 @@ export const BookingSection = ({
     if (selectedTime && !slots.includes(selectedTime)) setSelectedTime(null);
   }, [slots, selectedTime]);
 
-  // Calendrier aligné : 2 semaines lundi → samedi (dimanches et jours passés exclus),
-  // chaque jour de semaine toujours dans la même colonne. Jours fermés visibles mais désactivés.
-  const days: DayCell[] = useMemo(() => {
-    const WEEKS = 2;
+  // Calendrier aligné lundi → samedi, chaque jour toujours dans la même colonne.
+  // Horizon glissant de `horizonWeeks` semaines à partir du premier jour réservable
+  // (aujourd'hui, ou lundi si on est dimanche). Les jours passés et fermés restent
+  // visibles mais désactivés. La grille montre 2 semaines, les flèches avancent d'une.
+  const allDays: DayCell[] = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    // Lundi de la semaine en cours (getDay : 0 = dimanche … 6 = samedi).
-    const monday = new Date(today);
-    monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+    const firstBookable = new Date(today);
+    if (firstBookable.getDay() === 0) firstBookable.setDate(firstBookable.getDate() + 1);
+    // Lundi de la semaine du premier jour réservable (getDay : 0 = dimanche … 6 = samedi).
+    const monday = new Date(firstBookable);
+    monday.setDate(firstBookable.getDate() - ((firstBookable.getDay() + 6) % 7));
+    const weeks = Math.max(1, Math.min(12, Math.round(horizonWeeks) || DEFAULT_HORIZON_WEEKS));
 
     const out: DayCell[] = [];
-    for (let i = 0; i < WEEKS * 7; i++) {
+    for (let i = 0; i < weeks * 7; i++) {
       const d = new Date(monday);
       d.setDate(monday.getDate() + i);
       if (d.getDay() === 0) continue; // pas de dimanche
-      if (d < today) continue; // pas de jour déjà passé
       const dateStr = toDateString(d);
       const hours = openingHours[getDayOfWeek(dateStr)];
       out.push({
@@ -93,11 +108,20 @@ export const BookingSection = ({
         weekday: d.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '').toUpperCase(),
         dayNum: d.getDate(),
         closed: hours ? hours.closed : false,
+        past: d < today,
         weekdayIndex: ((d.getDay() + 6) % 7) + 1, // 1 = lundi … 6 = samedi
       });
     }
     return out;
-  }, [openingHours]);
+  }, [openingHours, horizonWeeks]);
+
+  const totalWeeks = Math.ceil(allDays.length / 6);
+  const maxOffset = Math.max(0, totalWeeks - WEEKS_PER_PAGE);
+  const safeOffset = Math.min(weekOffset, maxOffset);
+  const days = useMemo(
+    () => allDays.slice(safeOffset * 6, (safeOffset + WEEKS_PER_PAGE) * 6),
+    [allDays, safeOffset],
+  );
 
   const monthLabel = useMemo(() => {
     if (!days.length) return '';
@@ -170,6 +194,7 @@ export const BookingSection = ({
       if (res.ok) {
         setConfirmedInfo({
           firstName: contact.firstName,
+          email: contact.email,
           dayLabel: fmtWeekday(selectedDate),
           recapLine: `${selectedService.name} · ${recapDate} à ${selectedTime}`,
           calendarUrl: buildCalendarUrl(start, end),
@@ -189,6 +214,7 @@ export const BookingSection = ({
     setConfirmed(false);
     setConfirmedInfo(null);
     setStep(1);
+    setWeekOffset(0);
     setSelectedCategory(null);
     setSelectedService(null);
     setSelectedTime(null);
@@ -206,6 +232,7 @@ export const BookingSection = ({
             recapLine={confirmedInfo.recapLine}
             address={SALON_ADDRESS}
             calendarUrl={confirmedInfo.calendarUrl}
+            email={emailConfirmation ? confirmedInfo.email : undefined}
             onReset={reset}
           />
         ) : (
@@ -243,6 +270,10 @@ export const BookingSection = ({
                   steps={steps}
                   monthLabel={monthLabel}
                   days={days}
+                  canGoPrev={safeOffset > 0}
+                  canGoNext={safeOffset < maxOffset}
+                  onPrevWeek={() => setWeekOffset(Math.max(0, safeOffset - 1))}
+                  onNextWeek={() => setWeekOffset(Math.min(maxOffset, safeOffset + 1))}
                   selectedDate={selectedDate}
                   onSelectDate={setSelectedDate}
                   slots={slots}
