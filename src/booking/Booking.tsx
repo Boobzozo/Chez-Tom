@@ -154,13 +154,16 @@ export const BookingSection = ({
       const res = await fetch('/api/bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // Le serveur retrouve la prestation par son id (durée, prix) et calcule la fin
+        // lui-même ; `end` ci-dessus ne sert qu'au lien « Ajouter au calendrier ».
         body: JSON.stringify({
           customer_name: customerName,
           customer_email: contact.email,
           customer_phone: contact.phone,
+          service_id: selectedService.id,
           service_type: selectedService.name,
           start_time: start,
-          end_time: end,
+          sms_opt_in: contact.smsOptIn,
         }),
       });
       const data = await res.json();

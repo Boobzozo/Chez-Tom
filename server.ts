@@ -23,6 +23,8 @@ const __dirname = path.dirname(__filename);
 // Configuration (variables d'environnement, toutes facultatives sauf indication)
 // ---------------------------------------------------------------------------
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+// Mode test (`npm test`) : API seule, sans Vite ni dist/, sans rate limiting.
+const IS_TEST = process.env.NODE_ENV === "test";
 // Chemin absolu par défaut : lancé depuis n'importe quel dossier, on retrouve la même base.
 const DB_PATH = process.env.DB_PATH?.trim() || path.resolve(__dirname, "chez-tom.db");
 // Webhooks n8n (vides = désactivés).
@@ -165,6 +167,14 @@ try {
   // Column already exists or other error
 }
 
+// Migration : consentement du client à recevoir un rappel (case cochée dans le tunnel).
+// Le rappel lui-même n'existe pas encore ; on garde la preuve du consentement pour plus tard.
+try {
+  db.prepare("ALTER TABLE bookings ADD COLUMN sms_opt_in INTEGER DEFAULT 0").run();
+} catch (e) {
+  // Column already exists or other error
+}
+
 // ---------------------------------------------------------------------------
 // Sécurité admin : hash du mot de passe + tokens de session + rate limiting
 // ---------------------------------------------------------------------------
@@ -191,6 +201,22 @@ const verifyPassword = (password: string, stored: string | undefined) => {
     console.log("[sécurité] Mot de passe admin hashé (scrypt).");
   }
 }
+
+// Mot de passe par défaut : tant qu'il n'a pas été remplacé, l'espace gérant impose
+// d'en définir un nouveau avant d'aller plus loin. Le drapeau est posé une fois pour
+// toutes (on ne re-teste pas « admin123 » à chaque démarrage).
+const DEFAULT_ADMIN_PASSWORD = "admin123";
+{
+  const flag = db.prepare("SELECT value FROM settings WHERE key = 'admin_password_is_default'").get() as { value: string } | undefined;
+  if (!flag) {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'admin_password'").get() as { value: string } | undefined;
+    const isDefault = verifyPassword(DEFAULT_ADMIN_PASSWORD, row?.value);
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('admin_password_is_default', ?)").run(isDefault ? "true" : "false");
+    if (isDefault) console.warn("[sécurité] ⚠️  Le mot de passe gérant est celui par défaut : il devra être changé à la première connexion.");
+  }
+}
+const isDefaultPassword = () =>
+  (db.prepare("SELECT value FROM settings WHERE key = 'admin_password_is_default'").get() as { value: string } | undefined)?.value === "true";
 
 // Échappement HTML pour les valeurs saisies par les clients et insérées dans un email.
 const escapeHtml = (value: unknown) =>
@@ -236,6 +262,7 @@ const requireAdmin = (req: express.Request, res: express.Response, next: express
 const rateBuckets = new Map<string, { count: number; resetAt: number }>();
 const rateLimit = (bucket: string, maxAttempts: number, windowMs: number) =>
   (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (IS_TEST) return next();
     const key = `${bucket}:${req.ip}`;
     const now = Date.now();
     const entry = rateBuckets.get(key);
@@ -250,11 +277,16 @@ const rateLimit = (bucket: string, maxAttempts: number, windowMs: number) =>
     next();
   };
 
+// Jetons `state` OAuth Google en attente (émis par /api/auth/google/url, consommés au callback).
+const OAUTH_STATE_TTL = 10 * 60 * 1000;
+const oauthStates = new Map<string, number>();
+
 // Purge périodique des compteurs et tokens expirés (sinon les Map grossissent sans fin).
 setInterval(() => {
   const now = Date.now();
   for (const [key, entry] of rateBuckets) if (now > entry.resetAt) rateBuckets.delete(key);
   for (const [token, expiry] of adminTokens) if (now > expiry) adminTokens.delete(token);
+  for (const [state, expiry] of oauthStates) if (now > expiry) oauthStates.delete(state);
 }, 10 * 60 * 1000).unref();
 
 async function getGoogleAccessToken() {
@@ -343,14 +375,93 @@ async function getGoogleBusyRanges(date: string): Promise<Array<{ s: number; e: 
         ranges.push({ s: 0, e: 24 * 60 });
       }
     } else if (ev.start?.dateTime && ev.end?.dateTime) {
-      const s = ev.start.dateTime.startsWith(date) ? toMin(ev.start.dateTime) : 0;
-      const e = ev.end.dateTime.startsWith(date) ? toMin(ev.end.dateTime) : 24 * 60;
+      // Un événement qui ne touche pas ce jour (ex. le lendemain à 00:30, renvoyé à cause
+      // du décalage UTC de timeMax) ne doit surtout pas bloquer toute la journée.
+      const startsOn = ev.start.dateTime.slice(0, 10);
+      const endsOn = ev.end.dateTime.slice(0, 10);
+      if (startsOn > date || endsOn < date) continue;
+      const s = startsOn === date ? toMin(ev.start.dateTime) : 0;
+      const e = endsOn === date ? toMin(ev.end.dateTime) : 24 * 60;
       if (e > s) ranges.push({ s, e });
     }
   }
 
   googleBusyCache.set(cacheKey, { ranges, expiry: Date.now() + GOOGLE_BUSY_TTL });
   return ranges;
+}
+
+/** Comme getGoogleBusyRanges, mais jamais bloquant : [] si Google est injoignable. */
+async function getGoogleBusyRangesSafe(date: string): Promise<BusyRange[]> {
+  try {
+    return await getGoogleBusyRanges(date);
+  } catch (err: any) {
+    console.log(`Disponibilité : agenda Google injoignable, calcul local seul (${err.response?.status || err.message})`);
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Disponibilité — UNE seule fonction, utilisée par GET /api/availability ET par
+// POST /api/bookings : un créneau n'est réservable que s'il figure dans la liste
+// qu'elle calcule (horaires, pause, indisponibilités, réservations, agenda Google).
+// ---------------------------------------------------------------------------
+type BusyRange = { s: number; e: number };
+type ServiceRow = { id: string; name: string; price: number; duration: number; category_id?: string; description?: string };
+
+const DAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+const SLOT_STEP = 30; // minutes entre deux débuts de créneau
+const pad2 = (n: number) => String(n).padStart(2, "0");
+const minutesOf = (t: string) => { const [h, mn] = t.split(":").map(Number); return h * 60 + mn; };
+const slotLabel = (t: number) => `${pad2(Math.floor(t / 60))}:${pad2(t % 60)}`;
+const toLocalIso = (d: Date) =>
+  `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}:00`;
+
+function getOpeningHours(): Record<string, any> {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'opening_hours'").get() as { value: string } | undefined;
+  try { return row ? JSON.parse(row.value) : {}; } catch { return {}; /* horaires illisibles → tout fermé */ }
+}
+
+/** Plages occupées locales du jour : réservations confirmées + indisponibilités. Synchrone. */
+function getLocalBusyRanges(date: string): BusyRange[] {
+  const dayStart = `${date}T00:00:00`;
+  const dayEnd = `${date}T23:59:59`;
+  const rows = [
+    ...db.prepare("SELECT start_time, end_time FROM bookings WHERE status = 'confirmed' AND start_time < ? AND end_time > ?").all(dayEnd, dayStart) as any[],
+    ...db.prepare("SELECT start_time, end_time FROM blocks WHERE start_time < ? AND end_time > ?").all(dayEnd, dayStart) as any[],
+  ];
+  return rows.map((r) => {
+    const s = new Date(r.start_time); const e = new Date(r.end_time);
+    return {
+      s: r.start_time.startsWith(date) ? s.getHours() * 60 + s.getMinutes() : 0,
+      e: r.end_time.startsWith(date) ? e.getHours() * 60 + e.getMinutes() : 24 * 60,
+    };
+  });
+}
+
+/**
+ * Créneaux libres (« HH:MM ») pour une date et une durée. Synchrone : relit la base à
+ * l'appel, ce qui permet de l'exécuter DANS la transaction qui insère une réservation.
+ * Les plages Google (asynchrones) sont passées en paramètre.
+ */
+function computeFreeSlots(date: string, duration: number, extraBusy: BusyRange[] = []): string[] {
+  const [y, m, d] = date.split("-").map(Number);
+  const hours = getOpeningHours()[DAY_NAMES[new Date(y, m - 1, d).getDay()]];
+  if (!hours || hours.closed) return [];
+
+  const open = minutesOf(hours.open || "09:00");
+  const close = minutesOf(hours.close || "19:00");
+  const breakStart = hours.has_break ? minutesOf(hours.break_start || "12:00") : null;
+  const breakEnd = hours.has_break ? minutesOf(hours.break_end || "14:00") : null;
+  const busy = [...getLocalBusyRanges(date), ...extraBusy];
+
+  const slots: string[] = [];
+  for (let t = open; t + duration <= close; t += SLOT_STEP) {
+    const tEnd = t + duration;
+    if (breakStart !== null && breakEnd !== null && t < breakEnd && tEnd > breakStart) continue;
+    if (busy.some((b) => t < b.e && tEnd > b.s)) continue;
+    slots.push(slotLabel(t));
+  }
+  return slots;
 }
 
 async function startServer() {
@@ -408,7 +519,7 @@ async function startServer() {
     if (typeof password !== "string" || !verifyPassword(password, stored?.value)) {
       return res.status(401).json({ error: "Mot de passe incorrect" });
     }
-    res.json({ token: createAdminToken() });
+    res.json({ token: createAdminToken(), mustChangePassword: isDefaultPassword() });
   });
 
   app.post("/api/admin/logout", (req, res) => {
@@ -419,7 +530,7 @@ async function startServer() {
 
   // Permet au front de vérifier qu'un token stocké est encore valide.
   app.get("/api/admin/me", requireAdmin, (req, res) => {
-    res.json({ ok: true });
+    res.json({ ok: true, mustChangePassword: isDefaultPassword() });
   });
 
   app.get("/api/services", (req, res) => {
@@ -490,12 +601,16 @@ async function startServer() {
 
   app.post("/api/bookings", rateLimit("booking", 5, 10 * 60 * 1000), async (req, res) => {
     try {
-    const { customer_name, customer_email, customer_phone, service_type, start_time, end_time } = req.body;
+    const {
+      customer_name, customer_email, customer_phone,
+      service_id, service_type: requestedServiceType,
+      start_time: requestedStart, sms_opt_in,
+    } = req.body ?? {};
 
     // Validation serveur (le front valide déjà, mais l'API est publique).
     const isStr = (v: unknown, max: number) => typeof v === "string" && v.trim().length > 0 && v.length <= max;
-    if (!isStr(customer_name, 100) || !isStr(service_type, 100)) {
-      return res.status(400).json({ error: "Nom ou prestation invalide." });
+    if (!isStr(customer_name, 100)) {
+      return res.status(400).json({ error: "Nom invalide." });
     }
     if (!isStr(customer_email, 254) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer_email)) {
       return res.status(400).json({ error: "Adresse e-mail invalide." });
@@ -503,45 +618,59 @@ async function startServer() {
     if (customer_phone !== undefined && customer_phone !== null && (typeof customer_phone !== "string" || customer_phone.length > 30)) {
       return res.status(400).json({ error: "Numéro de téléphone invalide." });
     }
-    const startDate = new Date(start_time);
-    const endDate = new Date(end_time);
-    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime()) || endDate <= startDate) {
+
+    // Prestation : résolue côté serveur. Durée et prix font foi ici, jamais depuis le client.
+    // `service_id` de préférence ; `service_type` (le nom) accepté par compatibilité.
+    const service = (
+      (isStr(service_id, 100) && db.prepare("SELECT * FROM services WHERE id = ?").get(service_id)) ||
+      (isStr(requestedServiceType, 100) && db.prepare("SELECT * FROM services WHERE name = ?").get(requestedServiceType)) ||
+      undefined
+    ) as ServiceRow | undefined;
+    if (!service) {
+      return res.status(400).json({ error: "Prestation inconnue." });
+    }
+    if (!Number.isInteger(service.duration) || service.duration <= 0 || service.duration > 480) {
+      return res.status(400).json({ error: "Prestation mal configurée (durée). Contactez le salon." });
+    }
+    const service_type = service.name;
+
+    // Créneau : heure murale locale « AAAA-MM-JJTHH:MM(:00) ». La fin est calculée ici.
+    const match = typeof requestedStart === "string" && /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::00)?$/.exec(requestedStart);
+    if (!match) {
       return res.status(400).json({ error: "Créneau invalide." });
     }
-    if (endDate.getTime() - startDate.getTime() > 8 * 60 * 60 * 1000) {
-      return res.status(400).json({ error: "Durée de créneau invalide." });
+    const [, date, slot] = match;
+    const startDate = new Date(`${date}T${slot}:00`);
+    if (isNaN(startDate.getTime()) || toLocalIso(startDate) !== `${date}T${slot}:00`) {
+      return res.status(400).json({ error: "Créneau invalide." });
     }
     if (startDate.getTime() < Date.now() - 60 * 60 * 1000) {
       return res.status(400).json({ error: "Ce créneau est déjà passé." });
     }
+    const start_time = `${date}T${slot}:00`;
+    const end_time = toLocalIso(new Date(startDate.getTime() + service.duration * 60_000));
+    const smsOptIn = sms_opt_in === true || sms_opt_in === 1 || sms_opt_in === "true" ? 1 : 0;
 
-    const googleAccessToken = await getGoogleAccessToken();
-    
-    // 1. Local availability check (Safety net)
-    const localOverlap = db.prepare(`
-      SELECT COUNT(*) as count FROM bookings 
-      WHERE (start_time < ? AND end_time > ?)
-      AND status = 'confirmed'
-      ${googleAccessToken ? "AND google_event_id IS NULL" : ""}
-    `).get(end_time, start_time) as { count: number };
+    // Agenda Google (asynchrone, jamais bloquant) AVANT la transaction.
+    const googleBusy = await getGoogleBusyRangesSafe(date);
 
-    if (localOverlap.count > 0) {
-      return res.status(400).json({ error: "Ce créneau est déjà réservé sur le site." });
+    // Vérification + insertion dans une même transaction : le créneau demandé doit être
+    // dans la liste que le site aurait proposée à cet instant (horaires, pause,
+    // indisponibilités, réservations, Google). Sinon, rien n'est écrit.
+    const bookOrNull = db.transaction((): number | bigint | null => {
+      const free = computeFreeSlots(date, service.duration, googleBusy);
+      if (!free.includes(slot)) return null;
+      return db.prepare(`
+        INSERT INTO bookings (customer_name, customer_email, customer_phone, service_type, start_time, end_time, google_event_id, sms_opt_in)
+        VALUES (?, ?, ?, ?, ?, ?, NULL, ?)
+      `).run(customer_name.trim(), customer_email.trim(), customer_phone?.trim() || null, service_type, start_time, end_time, smsOptIn).lastInsertRowid;
+    });
+    const localId = bookOrNull();
+    if (localId === null) {
+      return res.status(409).json({ error: "Ce créneau n'est pas disponible. Choisissez-en un autre." });
     }
 
-    // 2. Google Calendar Integration is now handled by n8n to avoid duplicates and disconnections
-    let googleEventId = null;
-    let googleCalendarError = null;
-
-    // 3. Save locally (Always, as a backup)
-    const stmt = db.prepare(`
-      INSERT INTO bookings (customer_name, customer_email, customer_phone, service_type, start_time, end_time, google_event_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-    const result = stmt.run(customer_name, customer_email, customer_phone || null, service_type, start_time, end_time, googleEventId);
-    const localId = result.lastInsertRowid;
-
-    // 4. Send Confirmation Email & Webhook (Non-blocking)
+    // Tâches secondaires (email, webhooks, notification) — non bloquantes.
     (async () => {
       try {
         const dateStr = new Date(start_time).toLocaleDateString('fr-FR', { 
@@ -596,22 +725,20 @@ async function startServer() {
         const telegramNotifyUrl = N8N_TELEGRAM_WEBHOOK_URL;
         let reservationId = `TOM-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 10000)}`;
 
-        // Fetch service details
-        const service = db.prepare("SELECT duration, price FROM services WHERE name = ?").get(service_type) as { duration: number, price: number } | undefined;
-        const duration = service?.duration || 30;
-        const price = service?.price || 0;
-
         const webhookPayload = {
           event: 'booking.created',
           data: {
+            booking_id: localId,
             customer_name,
             customer_email,
             customer_phone,
+            service_id: service.id,
             service_type,
-            duration,
-            price,
+            duration: service.duration,
+            price: service.price,
             start_time,
             end_time,
+            sms_opt_in: smsOptIn === 1,
             formatted_date: dateStr,
             formatted_time: timeStr
           }
@@ -670,9 +797,12 @@ async function startServer() {
       }
     })();
 
-    res.status(201).json({ 
-      success: true, 
-      googleCalendarError: googleCalendarError 
+    res.status(201).json({
+      success: true,
+      id: localId,
+      service: service_type,
+      start_time,
+      end_time,
     });
     } catch (err: any) {
       console.error("Erreur lors de la réservation:", err.response?.data || err.message);
@@ -684,57 +814,12 @@ async function startServer() {
   app.get("/api/availability", async (req, res) => {
     const date = String(req.query.date || "");
     const duration = Number(req.query.duration);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(duration) || duration <= 0 || duration > 480) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isInteger(duration) || duration <= 0 || duration > 480) {
       return res.status(400).json({ error: "Paramètres invalides" });
     }
-
-    const hoursRow = db.prepare("SELECT value FROM settings WHERE key = 'opening_hours'").get() as { value: string } | undefined;
-    let openingHours: Record<string, any> = {};
-    try { openingHours = hoursRow ? JSON.parse(hoursRow.value) : {}; } catch { /* horaires illisibles → jour fermé */ }
-
-    const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-    const [y, m, d] = date.split("-").map(Number);
-    const hours = openingHours[dayNames[new Date(y, m - 1, d).getDay()]];
-    if (!hours || hours.closed) return res.json({ slots: [] });
-
-    const toMin = (t: string) => { const [h, mn] = t.split(":").map(Number); return h * 60 + mn; };
-    const open = toMin(hours.open || "09:00");
-    const close = toMin(hours.close || "19:00");
-    const breakStart = hours.has_break ? toMin(hours.break_start || "12:00") : null;
-    const breakEnd = hours.has_break ? toMin(hours.break_end || "14:00") : null;
-
-    // Plages occupées du jour : réservations confirmées + indisponibilités locales.
-    const busy: Array<{ s: number; e: number }> = [];
-    const dayStart = `${date}T00:00:00`;
-    const dayEnd = `${date}T23:59:59`;
-    const rows = [
-      ...db.prepare("SELECT start_time, end_time FROM bookings WHERE status = 'confirmed' AND start_time < ? AND end_time > ?").all(dayEnd, dayStart) as any[],
-      ...db.prepare("SELECT start_time, end_time FROM blocks WHERE start_time < ? AND end_time > ?").all(dayEnd, dayStart) as any[],
-    ];
-    for (const r of rows) {
-      const s = new Date(r.start_time); const e = new Date(r.end_time);
-      const sMin = r.start_time.startsWith(date) ? s.getHours() * 60 + s.getMinutes() : 0;
-      const eMin = r.end_time.startsWith(date) ? e.getHours() * 60 + e.getMinutes() : 24 * 60;
-      busy.push({ s: sMin, e: eMin });
-    }
-
-    // + événements de l'agenda Google du gérant (synchro dans le sens Google → site).
-    // Si Google est injoignable, on continue avec le calcul local (jamais bloquant).
-    try {
-      const googleBusy = await getGoogleBusyRanges(date);
-      busy.push(...googleBusy);
-    } catch (err: any) {
-      console.log(`Disponibilité : agenda Google injoignable, calcul local seul (${err.response?.status || err.message})`);
-    }
-
-    const slots: string[] = [];
-    for (let t = open; t + duration <= close; t += 30) {
-      const tEnd = t + duration;
-      if (breakStart !== null && breakEnd !== null && t < breakEnd && tEnd > breakStart) continue;
-      if (busy.some((b) => t < b.e && tEnd > b.s)) continue;
-      slots.push(`${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`);
-    }
-    res.json({ slots });
+    // Même calcul que celui qui valide une réservation (voir computeFreeSlots).
+    const googleBusy = await getGoogleBusyRangesSafe(date);
+    res.json({ slots: computeFreeSlots(date, duration, googleBusy) });
   });
 
   // --- Indisponibilités (locales ; miroir Google optionnel, non bloquant) ---
@@ -824,11 +909,18 @@ async function startServer() {
       return res.status(400).json({ error: "Paramètres invalides" });
     }
     let stored = value.toString();
+    if (key === "admin_password_is_default") {
+      return res.status(400).json({ error: "Réglage interne." });
+    }
     if (key === "admin_password") {
       if (stored.length < 8) {
         return res.status(400).json({ error: "Le mot de passe doit faire au moins 8 caractères." });
       }
+      if (stored === DEFAULT_ADMIN_PASSWORD) {
+        return res.status(400).json({ error: "Choisissez un mot de passe différent de celui par défaut." });
+      }
       stored = hashPassword(stored);
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('admin_password_is_default', 'false')").run();
     }
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(key, stored);
     res.json({ success: true });
@@ -1121,6 +1213,11 @@ async function startServer() {
       });
     }
 
+    // `state` : jeton à usage unique émis pour l'admin connecté. Sans lui, n'importe qui
+    // connaissant le client ID pouvait faire enregistrer SON agenda Google sur le site.
+    const state = crypto.randomBytes(24).toString("hex");
+    oauthStates.set(state, Date.now() + OAUTH_STATE_TTL);
+
     const redirectUri = `${appUrl}/auth/google/callback`;
     const params = new URLSearchParams({
       client_id: clientId,
@@ -1128,17 +1225,26 @@ async function startServer() {
       response_type: "code",
       scope: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly",
       access_type: "offline",
-      prompt: "consent"
+      prompt: "consent",
+      state,
     });
     res.json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${params}` });
   });
 
   // Google OAuth Callback
   app.get("/auth/google/callback", async (req, res) => {
-    const { code } = req.query;
+    const { code, state } = req.query;
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
     const appUrl = process.env.APP_URL?.replace(/\/$/, ""); // Remove trailing slash
+
+    const stateExpiry = typeof state === "string" ? oauthStates.get(state) : undefined;
+    if (typeof state === "string") oauthStates.delete(state);
+    if (!stateExpiry || Date.now() > stateExpiry) {
+      return res.status(400).send(
+        "<html><body><p>Lien de connexion Google invalide ou expiré. Relancez « Lier Google Calendar » depuis l'espace gérant.</p></body></html>"
+      );
+    }
 
     if (code && clientId && clientSecret && appUrl) {
       try {
@@ -1226,7 +1332,9 @@ async function startServer() {
   });
 
   // Vite middleware for development
-  if (!IS_PRODUCTION) {
+  if (IS_TEST) {
+    // Tests : API seule.
+  } else if (!IS_PRODUCTION) {
     console.log("Initializing Vite middleware...");
     // Import dynamique : en production, vite n'est jamais chargé (le serveur sert dist/).
     const { createServer: createViteServer } = await import("vite");

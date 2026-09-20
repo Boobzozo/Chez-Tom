@@ -5,7 +5,7 @@ import { Scissors, Clock, MapPin, Phone, Instagram, Facebook, Menu, X, ChevronRi
 // --- Types ---
 import type { Service, Category, DayHours, AppSettings, GalleryImage } from './types';
 import { BookingSection } from './booking/Booking';
-import { adminFetch, adminLogin, adminLogout, checkAdminSession } from './admin/api';
+import { adminFetch, adminLogin, adminLogout, checkAdminSession, changeAdminPassword } from './admin/api';
 
 // L'espace gérant (FullCalendar, socket.io…) n'est chargé
 // que si l'admin se connecte — les visiteurs ne le téléchargent jamais.
@@ -469,8 +469,79 @@ export default function App() {
 // aucun point d'entrée visible sur le site public.
 const isAdminRoute = window.location.pathname.replace(/\/+$/, '') === '/admin';
 
+// Première connexion : le mot de passe livré avec le site doit être remplacé
+// avant d'accéder au tableau de bord.
+const SetPasswordScreen = ({ onDone, onLogout }: { onDone: () => void; onLogout: () => void }) => {
+  const [pwd, setPwd] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const canSave = pwd.length >= 8 && pwd === confirm && !saving;
+
+  const submit = async () => {
+    if (!canSave) return;
+    setSaving(true);
+    setError(null);
+    const result = await changeAdminPassword(pwd);
+    setSaving(false);
+    if (result.ok) onDone();
+    else setError(result.error ?? 'Erreur lors de la mise à jour.');
+  };
+
+  return (
+    <div className="min-h-screen bg-paper flex items-center justify-center p-6 selection:bg-gold selection:text-dark">
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm">
+        <div className="text-center mb-8">
+          <div className="text-2xl font-serif font-bold tracking-[0.3em] text-dark">TOM BARBER</div>
+          <div className="mono-label text-gold-deep mt-3">Première connexion</div>
+        </div>
+        <div className="bg-white border border-hairline rounded-[4px] p-8 shadow-sm">
+          <p className="text-sm text-muted-deep leading-relaxed mb-6">
+            Le mot de passe livré avec le site est connu de tous. Choisissez le vôtre avant de continuer.
+          </p>
+          <label htmlFor="new-password" className="mono-label text-muted-deep block mb-2">Nouveau mot de passe</label>
+          <input
+            id="new-password"
+            type="password"
+            value={pwd}
+            onChange={(e) => { setPwd(e.target.value); setError(null); }}
+            autoFocus
+            autoComplete="new-password"
+            placeholder="8 caractères minimum"
+            className="w-full bg-white border border-hairline rounded-[3px] px-4 py-3 mb-4 outline-none focus:border-dark transition-colors"
+          />
+          <label htmlFor="confirm-password" className="mono-label text-muted-deep block mb-2">Confirmation</label>
+          <input
+            id="confirm-password"
+            type="password"
+            value={confirm}
+            onChange={(e) => { setConfirm(e.target.value); setError(null); }}
+            autoComplete="new-password"
+            className="w-full bg-white border border-hairline rounded-[3px] px-4 py-3 mb-3 outline-none focus:border-dark transition-colors"
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+          />
+          {confirm && pwd !== confirm && (
+            <p className="text-sm mb-3" style={{ color: '#B23A2B' }}>Les deux saisies ne correspondent pas.</p>
+          )}
+          {error && <p role="alert" className="text-sm mb-3" style={{ color: '#B23A2B' }}>{error}</p>}
+          <button onClick={submit} disabled={!canSave} className="w-full btn-primary py-3 mt-2">
+            {saving ? 'Enregistrement…' : 'Enregistrer et continuer'}
+          </button>
+        </div>
+        <button onClick={onLogout} className="btn-ghost mx-auto mt-8 w-fit flex">
+          <span className="w-4 h-px bg-muted-deep" />
+          Se déconnecter
+        </button>
+      </motion.div>
+    </div>
+  );
+};
+
 function AppContent() {
   const [isAdmin, setIsAdmin] = useState(false);
+  // Tant que le mot de passe est celui par défaut, on impose d'en définir un nouveau.
+  const [mustChangePassword, setMustChangePassword] = useState(false);
   const [sessionChecked, setSessionChecked] = useState(!isAdminRoute);
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -535,9 +606,10 @@ function AppContent() {
     fetchCategories();
     // Sur /admin : restaure la session si un token valide est encore présent.
     if (isAdminRoute) {
-      checkAdminSession().then((ok) => {
-        if (ok) {
+      checkAdminSession().then((session) => {
+        if (session.ok) {
           setIsAdmin(true);
+          setMustChangePassword(session.mustChangePassword);
           fetchSettings(true);
         }
         setSessionChecked(true);
@@ -562,6 +634,7 @@ function AppContent() {
     setLoggingIn(false);
     if (result.ok) {
       setIsAdmin(true);
+      setMustChangePassword(result.mustChangePassword === true);
       setPassword('');
       fetchSettings(true);
     } else {
@@ -590,6 +663,10 @@ function AppContent() {
           <span className="mono-label text-muted-deep animate-pulse">Tom Barber…</span>
         </div>
       );
+    }
+
+    if (isAdmin && mustChangePassword) {
+      return <SetPasswordScreen onDone={() => setMustChangePassword(false)} onLogout={handleLogout} />;
     }
 
     if (isAdmin) {

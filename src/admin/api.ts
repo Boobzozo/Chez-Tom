@@ -18,7 +18,9 @@ export const adminFetch = (input: RequestInfo | URL, init: RequestInit = {}) => 
 };
 
 /** Tente la connexion ; stocke le token si OK, sinon renvoie le message d'erreur. */
-export const adminLogin = async (password: string): Promise<{ ok: boolean; error?: string }> => {
+export const adminLogin = async (
+  password: string,
+): Promise<{ ok: boolean; error?: string; mustChangePassword?: boolean }> => {
   try {
     const res = await fetch('/api/admin/login', {
       method: 'POST',
@@ -28,7 +30,7 @@ export const adminLogin = async (password: string): Promise<{ ok: boolean; error
     const data = await res.json().catch(() => ({}));
     if (res.ok && data.token) {
       setAdminToken(data.token);
-      return { ok: true };
+      return { ok: true, mustChangePassword: data.mustChangePassword === true };
     }
     return { ok: false, error: data.error || 'Mot de passe incorrect' };
   } catch {
@@ -45,13 +47,32 @@ export const adminLogout = async () => {
 };
 
 /** Vérifie qu'un token stocké est encore accepté par le serveur. */
-export const checkAdminSession = async (): Promise<boolean> => {
-  if (!getAdminToken()) return false;
+export const checkAdminSession = async (): Promise<{ ok: boolean; mustChangePassword: boolean }> => {
+  if (!getAdminToken()) return { ok: false, mustChangePassword: false };
   try {
     const res = await adminFetch('/api/admin/me');
-    if (!res.ok) clearAdminToken();
-    return res.ok;
+    if (!res.ok) {
+      clearAdminToken();
+      return { ok: false, mustChangePassword: false };
+    }
+    const data = await res.json().catch(() => ({}));
+    return { ok: true, mustChangePassword: data.mustChangePassword === true };
   } catch {
-    return false;
+    return { ok: false, mustChangePassword: false };
+  }
+};
+
+/** Change le mot de passe gérant (8 caractères minimum, différent de celui par défaut). */
+export const changeAdminPassword = async (newPassword: string): Promise<{ ok: boolean; error?: string }> => {
+  try {
+    const res = await adminFetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'admin_password', value: newPassword }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return res.ok ? { ok: true } : { ok: false, error: data.error || 'Erreur lors de la mise à jour.' };
+  } catch {
+    return { ok: false, error: 'Erreur réseau.' };
   }
 };

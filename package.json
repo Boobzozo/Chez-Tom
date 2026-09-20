@@ -10,7 +10,8 @@
     "start": "NODE_ENV=production tsx server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "NODE_ENV=test tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@fullcalendar/core": "^6.1.20",
