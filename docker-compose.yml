@@ -1,0 +1,69 @@
+# Déploiement du site Tom Barber.
+#
+# Ce fichier ne décrit QUE ce site : son conteneur, son volume, son réseau.
+# Il ne modifie aucun autre projet du serveur (Traefik, n8n, autres domaines) et
+# ne nécessite aucun redémarrage de Traefik : celui-ci surveille le socket Docker
+# et découvre le conteneur tout seul grâce aux étiquettes ci-dessous.
+#
+# Les deux valeurs qui dépendent de la machine — le domaine et le nom du réseau
+# de Traefik — sont dans .env. Changer de VPS = changer ces deux lignes.
+# Voir DEPLOIEMENT.md.
+
+name: chez-tom
+
+services:
+  app:
+    build: .
+    image: chez-tom:latest
+    container_name: chez-tom
+    restart: unless-stopped
+    # PID 1 minimal : signaux transmis correctement, processus zombies récupérés.
+    init: true
+
+    # Secrets et options applicatives (Resend, Google, n8n…).
+    env_file: .env
+
+    # Ces valeurs-là sont imposées par le déploiement : elles ont la priorité
+    # sur .env et ne doivent pas en dépendre.
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      TZ: ${TZ:-Europe/Paris}
+      DB_PATH: /data/chez-tom.db
+      UPLOADS_DIR: /data/uploads
+      APP_URL: https://${APP_HOST:?APP_HOST manquant dans .env}
+
+    volumes:
+      - data:/data
+
+    networks:
+      - proxy
+
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${PROXY_NETWORK:-root_default}
+
+      traefik.http.routers.chez-tom.rule: Host(`${APP_HOST}`)
+      # L'entrypoint `web` (port 80) redirige globalement vers HTTPS : inutile de
+      # le déclarer ici.
+      traefik.http.routers.chez-tom.entrypoints: websecure
+      traefik.http.routers.chez-tom.tls: "true"
+      traefik.http.routers.chez-tom.tls.certresolver: ${CERT_RESOLVER:-mytlschallenge}
+
+      traefik.http.services.chez-tom.loadbalancer.server.port: "3000"
+
+      # Pas de middleware d'en-têtes de sécurité : le serveur pose déjà lui-même
+      # HSTS, nosniff, X-Frame-Options et Referrer-Policy (server.ts). En ajouter
+      # ici produirait des en-têtes en double.
+
+networks:
+  # Réseau de Traefik, créé par un autre projet : on s'y raccroche sans le gérer.
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:-root_default}
+
+volumes:
+  # Nom explicite : le volume ne dépend pas du nom du dossier de déploiement,
+  # et se retrouve facilement pour les sauvegardes et la migration.
+  data:
+    name: chez-tom-data
