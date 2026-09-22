@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Scissors, Calendar, Clock, MapPin, Phone, Instagram, Facebook, X, Check, ChevronRight, Settings, LogOut, Plus, Trash2, User, Info, Bell, RefreshCw } from 'lucide-react';
 import FullCalendar from '@fullcalendar/react';
@@ -58,6 +58,21 @@ const getLocalDateString = () => {
   const pad = (n: number) => n.toString().padStart(2, '0');
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 };
+const pad2 = (n: number) => n.toString().padStart(2, '0');
+const dateKey = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const toMinutes = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+const toHHMM = (m: number) => `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`;
+/** Pas de la grille de créneaux du formulaire gérant (le site, lui, propose du 30 min). */
+const ADMIN_SLOT_STEP = 15;
+
+/** Prochaine demi-heure ronde : au comptoir, le client est là maintenant. */
+const nextHalfHour = () => {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() + ((30 - (now.getMinutes() % 30)) % 30), 0, 0);
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+};
+
 /**
  * Redimensionne une photo dans le navigateur avant envoi (côté long ≤ maxSide px,
  * JPEG qualité 0.85). Une photo de téléphone de 4 Mo devient ~300 Ko : le serveur
@@ -428,6 +443,39 @@ const AdminDashboard = ({
     endTime: '10:00'
   });
 
+  // Rendez-vous pris au salon, sans passer par le site.
+  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [bookingError, setBookingError] = useState<string | null>(null);
+  const [isSavingBooking, setIsSavingBooking] = useState(false);
+  const [newBooking, setNewBooking] = useState({
+    customer_name: '',
+    customer_phone: '',
+    customer_email: '',
+    service_id: '',
+    date: getLocalDateString(),
+    startTime: nextHalfHour(),
+  });
+  // Semaine affichée par le sélecteur de jour — indépendante du jour choisi, pour
+  // pouvoir feuilleter sans perdre sa sélection.
+  const [bookingWeek, setBookingWeek] = useState(getLocalDateString());
+  const slotsRef = useRef<HTMLDivElement | null>(null);
+  const shouldScrollSlots = useRef(false);
+
+  // Le planning se règle différemment sur téléphone (vues, densité, défilement
+  // latéral). Suivi en état plutôt que lu une fois : la rotation de l'écran compte.
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  // Sur téléphone, l'espace gérant sert à consulter le planning et à poser un
+  // rendez-vous : les réglages du salon sont repliés derrière un bouton.
+  const [showSettings, setShowSettings] = useState(false);
+  const [calendarView, setCalendarView] = useState(() => (window.innerWidth < 768 ? 'timeGridDay' : 'timeGridWeek'));
+
+
   useEffect(() => {
     fetchGoogleEvents();
     fetchCalendars();
@@ -515,7 +563,9 @@ const AdminDashboard = ({
     try {
       const now = new Date();
       const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-      const end = new Date(now.getFullYear(), now.getMonth() + 2, 0).toISOString();
+      // Quatre mois : le planning n'en affiche qu'une semaine, mais la vue du jour du
+      // formulaire de rendez-vous doit connaître l'occupation bien au-delà.
+      const end = new Date(now.getFullYear(), now.getMonth() + 4, 0).toISOString();
       const res = await adminFetch(`/api/google/events?start=${start}&end=${end}`);
       if (res.ok) {
         const events = await res.json();
@@ -533,7 +583,10 @@ const AdminDashboard = ({
               fullTitle: fullTitle,
               serviceType: serviceType,
               description: e.description,
-              isUnavailability: (e.summary || '').includes('Indisponibilité'),
+              // Le serveur marque explicitement les indisponibilités locales. Se fier au
+              // seul titre faisait passer « Livraison produits » pour un rendez-vous client.
+              // Le repli sur le titre reste utile pour les miroirs venus de Google.
+              isUnavailability: e.isUnavailability === true || (e.summary || '').includes('Indisponibilité'),
               isLocal: e.isLocal || false,
               isOrphaned: e.isOrphaned || false
             }
@@ -630,6 +683,52 @@ const AdminDashboard = ({
     }
   };
 
+  const openBookingModal = (prefill?: { date?: string; startTime?: string }) => {
+    const date = prefill?.date || getLocalDateString();
+    setBookingError(null);
+    setNewBooking({
+      customer_name: '',
+      customer_phone: '',
+      customer_email: '',
+      // La durée n'est pas saisie : le serveur la relit dans la prestation choisie.
+      service_id: services[0]?.id || '',
+      date,
+      startTime: prefill?.startTime || nextHalfHour(),
+    });
+    setBookingWeek(date);
+    shouldScrollSlots.current = true;
+    setShowBookingModal(true);
+  };
+
+  const addBooking = async () => {
+    setIsSavingBooking(true);
+    setBookingError(null);
+    try {
+      const res = await adminFetch('/api/admin/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_name: newBooking.customer_name,
+          customer_phone: newBooking.customer_phone,
+          customer_email: newBooking.customer_email,
+          service_id: newBooking.service_id,
+          start_time: `${newBooking.date}T${newBooking.startTime}`,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setShowBookingModal(false);
+        fetchGoogleEvents();
+      } else {
+        setBookingError(data.error || "Impossible d'enregistrer le rendez-vous.");
+      }
+    } catch {
+      setBookingError('Erreur réseau.');
+    } finally {
+      setIsSavingBooking(false);
+    }
+  };
+
   const updateOpeningHours = async (day: string, field: string, value: any) => {
     let currentHours = {};
     try {
@@ -642,7 +741,7 @@ const AdminDashboard = ({
     await updateSetting('opening_hours', JSON.stringify(newHours));
   };
 
-  let openingHours = {};
+  let openingHours: Record<string, DayHours> = {};
   try {
     openingHours = settings?.opening_hours ? JSON.parse(settings.opening_hours) : {};
   } catch (e) {
@@ -654,17 +753,184 @@ const AdminDashboard = ({
     thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche'
   };
 
+  // --- Fenêtre du planning --------------------------------------------------
+  // On n'affiche que les jours travaillés et la plage d'ouverture réelle : sinon
+  // la grille 8 h–20 h sur 7 jours oblige à faire défiler pour voir l'après-midi.
+  // La fenêtre s'élargit si un rendez-vous déborde, pour ne jamais le masquer.
+  const dayIndexes: Record<string, number> = {
+    sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6,
+  };
+
+  const minutesOf = (time?: string) => {
+    const [h, m] = (time || '').split(':').map(Number);
+    return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
+  };
+
+  const eventDays = new Set(googleEvents.map(e => new Date(e.start).getDay()));
+  const closedDays = days
+    .filter(day => openingHours[day]?.closed && !eventDays.has(dayIndexes[day]))
+    .map(day => dayIndexes[day]);
+  // Salon marqué fermé toute la semaine : on montre quand même la grille complète,
+  // FullCalendar refuse de s'afficher si les sept jours sont masqués.
+  const hiddenDays = closedDays.length >= 7 ? [] : closedDays;
+
+  const openDays = days.filter(day => !openingHours[day]?.closed);
+  const starts: number[] = openDays.map(day => minutesOf(openingHours[day]?.open) ?? 9 * 60);
+  const ends: number[] = openDays.map(day => minutesOf(openingHours[day]?.close) ?? 19 * 60);
+  if (starts.length === 0) { starts.push(9 * 60); ends.push(19 * 60); }
+
+  googleEvents.forEach(e => {
+    const start = new Date(e.start);
+    if (isNaN(start.getTime())) return;
+    const end = new Date(e.end || e.start);
+    const startMin = start.getHours() * 60 + start.getMinutes();
+    // Un événement qui court jusqu'au lendemain occupe la fin de journée.
+    const sameDay = !isNaN(end.getTime()) && end.toDateString() === start.toDateString();
+    starts.push(startMin);
+    ends.push(sameDay ? Math.max(startMin, end.getHours() * 60 + end.getMinutes()) : 24 * 60);
+  });
+
+  const firstHour = Math.max(0, Math.floor(Math.min(...starts) / 60));
+  const lastHour = Math.min(24, Math.max(firstHour + 1, Math.ceil(Math.max(...ends) / 60)));
+  const slotMinTime = `${String(firstHour).padStart(2, '0')}:00:00`;
+  const slotMaxTime = `${String(lastHour).padStart(2, '0')}:00:00`;
+
+  // --- Formulaire de rendez-vous : semaine, journée choisie, créneaux -------
+  // Tout est calculé à partir des rendez-vous déjà chargés : la fenêtre montre
+  // l'occupation réelle du jour, pas une simple liste d'heures.
+  const bookingService = services.find(service => service.id === newBooking.service_id);
+  const bookingDuration = bookingService?.duration ?? 30;
+
+  const parseDay = (value: string) => {
+    const [y, m, d] = value.split('-').map(Number);
+    const parsed = new Date(y, (m || 1) - 1, d);
+    return isNaN(parsed.getTime()) ? new Date() : parsed;
+  };
+  const hoursOf = (value: string) => openingHours[days[(parseDay(value).getDay() + 6) % 7]];
+
+  // Les sept jours de la semaine affichée, à partir du lundi.
+  const weekAnchor = parseDay(bookingWeek);
+  const weekMonday = new Date(weekAnchor);
+  weekMonday.setDate(weekMonday.getDate() - ((weekAnchor.getDay() + 6) % 7));
+  const bookingWeekDays = Array.from({ length: 7 }, (_, i) => {
+    const day = new Date(weekMonday);
+    day.setDate(day.getDate() + i);
+    return day;
+  });
+
+  const shiftBookingWeek = (weeks: number) => {
+    const next = new Date(weekMonday);
+    next.setDate(next.getDate() + weeks * 7);
+    setBookingWeek(dateKey(next));
+  };
+
+  // Occupation du jour choisi : rendez-vous et indisponibilités déjà posés.
+  const dayBusy = googleEvents
+    .filter(e => dateKey(new Date(e.start)) === newBooking.date)
+    .map(e => {
+      const from = new Date(e.start);
+      const to = new Date(e.end || e.start);
+      return {
+        from: from.getHours() * 60 + from.getMinutes(),
+        to: dateKey(to) === newBooking.date ? to.getHours() * 60 + to.getMinutes() : 24 * 60,
+        title: e.title as string,
+        service: e.extendedProps?.serviceType as string | undefined,
+        isUnavailability: Boolean(e.extendedProps?.isUnavailability),
+      };
+    })
+    .filter(b => b.to > b.from)
+    .sort((a, b) => a.from - b.from);
+
+  const dayHours = hoursOf(newBooking.date);
+  const dayClosed = Boolean(!dayHours || dayHours.closed);
+  const dayOpen = toMinutes(dayHours?.open || '09:00');
+  const dayClose = toMinutes(dayHours?.close || '19:00');
+  const breakFrom = dayHours?.has_break ? toMinutes(dayHours.break_start || '12:00') : null;
+  const breakTo = dayHours?.has_break ? toMinutes(dayHours.break_end || '14:00') : null;
+
+  // La grille déborde d'une heure de chaque côté : le gérant doit pouvoir caser
+  // quelqu'un juste avant l'ouverture ou juste après la fermeture.
+  const gridFrom = Math.max(0, Math.min(dayOpen - 60, ...dayBusy.map(b => b.from)));
+  const gridTo = Math.min(24 * 60, Math.max(dayClose + 60, ...dayBusy.map(b => b.to)));
+
+  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+  const isToday = newBooking.date === dateKey(new Date());
+
+  const bookingSlots = [] as Array<{
+    at: number;
+    label: string;
+    busy: typeof dayBusy[number] | undefined;
+    startsBusy: boolean;
+    blocked: boolean;
+    outside: boolean;
+    inBreak: boolean;
+    past: boolean;
+  }>;
+  for (let at = gridFrom; at < gridTo; at += ADMIN_SLOT_STEP) {
+    const busy = dayBusy.find(b => at < b.to && at + ADMIN_SLOT_STEP > b.from);
+    const inBreak = breakFrom !== null && breakTo !== null && at < breakTo && at + bookingDuration > breakFrom;
+    bookingSlots.push({
+      at,
+      label: toHHMM(at),
+      busy,
+      // Le nom n'est écrit que sur la première ligne du rendez-vous.
+      startsBusy: Boolean(busy && (busy.from >= at || at === gridFrom)) && !bookingSlots.some(s => s.busy === busy),
+      // Un début libre dont la prestation mordrait sur le voisin reste inutilisable :
+      // le serveur le refuserait de toute façon.
+      blocked: dayBusy.some(b => at < b.to && at + bookingDuration > b.from),
+      outside: dayClosed || at < dayOpen || at + bookingDuration > dayClose || inBreak,
+      inBreak,
+      past: isToday && at + bookingDuration <= nowMinutes,
+    });
+  }
+
+  // On prévient, on ne bloque pas : caser quelqu'un pendant la pause reste son droit.
+  const selectedSlot = bookingSlots.find(slot => slot.label === newBooking.startTime);
+  const bookingWarning = (() => {
+    if (dayClosed) return 'Le salon est fermé ce jour-là.';
+    if (!selectedSlot?.outside) return null;
+    const from = toMinutes(newBooking.startTime);
+    if (from < dayOpen || from + bookingDuration > dayClose) {
+      return `En dehors des horaires d'ouverture (${dayHours?.open || '09:00'} – ${dayHours?.close || '19:00'}).`;
+    }
+    return `Pendant la pause déjeuner (${dayHours?.break_start || '12:00'} – ${dayHours?.break_end || '14:00'}).`;
+  })();
+
+  // Ouverture du formulaire ou changement de jour : si l'heure retenue n'est pas
+  // sélectionnable (journée déjà écoulée, créneau pris), on se cale sur la première
+  // heure libre, puis la liste défile jusqu'à elle. Un choix délibéré n'est jamais écrasé.
+  useEffect(() => {
+    if (!showBookingModal || bookingSlots.length === 0) return;
+    const current = bookingSlots.find(slot => slot.label === newBooking.startTime);
+    // Sur un changement de jour on repart aussi d'une heure ouvrée : garder « 08:00 hors
+    // horaires » hérité du jour précédent n'a aucun sens. Un clic délibéré, lui, tient.
+    const stale = shouldScrollSlots.current && (current?.outside || current?.past);
+    if (!current || current.busy || current.blocked || stale) {
+      const fallback = bookingSlots.find(slot => !slot.busy && !slot.blocked && !slot.outside && !slot.past)
+        ?? bookingSlots.find(slot => !slot.busy && !slot.blocked);
+      if (fallback) {
+        setNewBooking(b => ({ ...b, startTime: fallback.label }));
+        return;
+      }
+    }
+    if (!shouldScrollSlots.current) return;
+    shouldScrollSlots.current = false;
+    const target = slotsRef.current?.querySelector('[data-selected="true"]');
+    (target as HTMLElement | null)?.scrollIntoView({ block: 'center' });
+  }, [showBookingModal, newBooking.date, newBooking.startTime]);
+
   if (loading) return <div className="pt-32 text-center font-serif text-2xl">Chargement...</div>;
 
   return (
-    <div className="pt-32 pb-24 px-6 max-w-6xl mx-auto">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-12 gap-4">
+    <div className="pt-24 pb-24 px-6 max-w-[1500px] mx-auto">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 gap-4">
         <div>
-          <h1 className="text-5xl font-serif mb-2">Espace Gérant</h1>
-          <p className="text-dark/40 uppercase tracking-widest text-xs">Gestion du salon & calendrier</p>
+          <h1 className="text-2xl md:text-4xl font-serif md:mb-1">Espace Gérant</h1>
+          {/* Sous-titre décoratif : sur téléphone, cette place vaut mieux au planning. */}
+          <p className="hidden md:block text-dark/40 uppercase tracking-widest text-xs">Gestion du salon & calendrier</p>
         </div>
         {/* Sur téléphone, les actions passent à la ligne au lieu de forcer la largeur de la page. */}
-        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+        <div className="flex items-center gap-2 md:gap-3 w-full md:w-auto">
           {/* Notifications Bell */}
           <div className="relative">
             <button 
@@ -735,482 +1001,547 @@ const AdminDashboard = ({
             </AnimatePresence>
           </div>
 
-          <button 
-            onClick={() => setShowUnavailabilityModal(true)}
-            className="btn-primary py-2 px-4 flex items-center gap-2"
+          {/* Le cas fréquent, c'est le client au comptoir : il passe en action principale. */}
+          <button
+            onClick={() => openBookingModal()}
+            className="btn-primary py-2 px-4 max-md:px-4! flex items-center justify-center gap-2 flex-1 md:flex-none"
           >
-            <Plus size={18} /> Ajouter une indisponibilité
+            <Plus size={18} className="shrink-0" />
+            <span className="md:hidden whitespace-nowrap">Rendez-vous</span>
+            <span className="hidden md:inline">Ajouter un rendez-vous</span>
           </button>
-          <button onClick={onLogout} className="btn-outline py-2 px-4">Déconnexion</button>
+          {/* Sur téléphone ces deux actions passent en icônes : trois boutons pleine
+              largeur empilés mangeaient 300 px avant même d'avoir vu le planning. */}
+          <button
+            onClick={() => setShowUnavailabilityModal(true)}
+            title="Bloquer un créneau"
+            aria-label="Bloquer un créneau"
+            className="btn-outline py-2 px-4 max-md:px-3! flex items-center gap-2 shrink-0"
+          >
+            <Clock size={18} />
+            <span className="hidden md:inline">Bloquer un créneau</span>
+          </button>
+          <button
+            onClick={onLogout}
+            title="Déconnexion"
+            aria-label="Déconnexion"
+            className="btn-outline py-2 px-4 max-md:px-3! flex items-center gap-2 shrink-0"
+          >
+            <LogOut size={18} className="md:hidden" />
+            <span className="hidden md:inline">Déconnexion</span>
+          </button>
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-12 gap-8">
-        {/* Sidebar Settings */}
-        <div className="lg:col-span-4 space-y-8 min-w-0">
-          <div className="glass-card rounded-[4px] p-5 md:p-8">
-            <h3 className="text-xl font-serif mb-6 flex items-center gap-2">
-              <Settings size={20} /> Configuration
-            </h3>
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <span className="text-sm">Afficher "Galerie"</span>
-                <button 
-                  onClick={() => updateSetting('show_gallery', settings?.show_gallery === 'true' ? 'false' : 'true')}
-                  className={`w-12 h-6 rounded-full transition-colors relative ${settings?.show_gallery === 'true' ? 'bg-dark' : 'bg-dark/10'}`}
-                >
-                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings?.show_gallery === 'true' ? 'left-7' : 'left-1'}`}></div>
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-sm">Afficher "À propos"</span>
-                <button 
-                  onClick={() => updateSetting('show_about', settings?.show_about === 'true' ? 'false' : 'true')}
-                  className={`w-12 h-6 rounded-full transition-colors relative ${settings?.show_about === 'true' ? 'bg-dark' : 'bg-dark/10'}`}
-                >
-                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings?.show_about === 'true' ? 'left-7' : 'left-1'}`}></div>
-                </button>
-              </div>
-
-              {/* Horizon de réservation */}
-              <div className="pt-6 border-t border-dark/5 space-y-2">
-                <label htmlFor="horizon-weeks" className="text-[10px] uppercase tracking-widest text-dark/40 font-bold block">
-                  Réservation possible jusqu'à
-                </label>
-                <div className="flex items-center gap-3">
-                  <select
-                    id="horizon-weeks"
-                    value={settings?.booking_horizon_weeks || '4'}
-                    onChange={(e) => updateSetting('booking_horizon_weeks', e.target.value)}
-                    className="bg-white border border-dark/10 py-2 px-3 rounded-[3px] text-sm outline-none focus:border-gold"
-                  >
-                    {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
-                      <option key={n} value={String(n)}>{n} {n > 1 ? 'semaines' : 'semaine'}</option>
-                    ))}
-                  </select>
-                  <span className="text-xs text-muted-deep">à l'avance</span>
-                </div>
-              </div>
-
-              {/* Changement du mot de passe admin */}
-              <div className="pt-6 border-t border-dark/5 space-y-2">
-                <label className="text-[10px] uppercase tracking-widest text-dark/40 font-bold">
-                  Changer le mot de passe gérant
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="password"
-                    value={newPassword}
-                    onChange={(e) => { setNewPassword(e.target.value); setPasswordMsg(null); }}
-                    placeholder="Nouveau mot de passe (8 caractères min.)"
-                    // min-w-0 : sans ça, la largeur minimale intrinsèque du champ
-                    // fait déborder la carte sur téléphone.
-                    className="flex-1 min-w-0 bg-dark/5 rounded-[3px] px-3 py-2 text-xs outline-none focus:bg-gold/10"
-                  />
-                  <button
-                    onClick={changePassword}
-                    disabled={newPassword.length < 8}
-                    className="btn-primary py-2 px-4 text-[10px] disabled:opacity-30 shrink-0"
-                  >
-                    Modifier
-                  </button>
-                </div>
-                {passwordMsg && (
-                  <p className={`text-xs ${passwordMsg.ok ? 'text-gold-deep' : 'text-red-500'}`}>{passwordMsg.text}</p>
-                )}
-              </div>
-
-              <div className="pt-6 border-t border-dark/5 space-y-3">
-                {calendars.length === 0 ? (
-                  <>
-                    <button
-                      onClick={connectGoogle}
-                      className="w-full flex items-center justify-center gap-2 border py-3 rounded-[3px] bg-white border-dark/10 hover:bg-dark/5 transition-colors text-sm font-medium"
-                    >
-                      <img src="https://www.google.com/favicon.ico" className="w-4 h-4" alt="Google" />
-                      Lier Google Calendar
-                    </button>
-                    <p className="text-[10px] text-muted-deep leading-tight">
-                      Facultatif — le planning et les réservations fonctionnent sans compte Google.
-                      Une fois lié : vos rendez-vous sont recopiés dans l'agenda choisi, et <strong>tout événement
-                      de cet agenda bloque les créneaux en ligne</strong> (pratique pour bloquer un créneau depuis
-                      votre téléphone). Un événement marqué « Disponible » ne bloque rien.
-                    </p>
-                  </>
-                ) : (
-                  <div className="bg-paper border border-hairline rounded-[3px] p-4">
-                    <div className="flex items-center gap-2 text-gold-deep font-bold text-xs mb-1">
-                      <Check size={14} /> Google Calendar Connecté
+      <div className="space-y-8">
+        {/* Le planning en tête : c'est ce qu'on vient consulter en premier. */}
+        <div className="grid lg:grid-cols-12 gap-8 items-start">
+          <div className="lg:col-span-9 min-w-0">
+            <div className="glass-card rounded-[4px] p-4 md:p-5 admin-calendar">
+              <FullCalendar
+                plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+                initialView={isMobile ? "timeGridDay" : "timeGridWeek"}
+                headerToolbar={isMobile ? {
+                  left: 'prev,next today',
+                  center: 'title',
+                  right: 'timeGridDay,timeGridThreeDay,timeGridWeek'
+                } : {
+                  left: 'prev,next today',
+                  center: 'title',
+                  right: 'dayGridMonth,timeGridWeek,timeGridDay'
+                }}
+                // Trois jours : le compromis lisible du téléphone. Une semaine sur 375 px
+                // donne six colonnes de 50 px où plus aucun nom ne tient ; trois colonnes
+                // en font 105. La semaine reste disponible pour la vue d'ensemble.
+                views={{
+                  timeGridThreeDay: { type: 'timeGrid', duration: { days: 3 }, buttonText: '3 jours' },
+                }}
+                // Titre court sur téléphone, sinon il pousse les flèches hors de la ligne.
+                titleFormat={isMobile ? { day: 'numeric', month: 'short' } : undefined}
+                // En vue semaine sur téléphone, « LUN. 21/09 » ne tient pas dans 43 px et
+                // les colonnes se chevauchent : on tombe à l'initiale et au quantième.
+                dayHeaderFormat={isMobile && calendarView === 'timeGridWeek'
+                  ? { weekday: 'narrow', day: 'numeric' }
+                  : undefined}
+                locale={frLocale}
+                events={googleEvents}
+                eventClassNames={(arg) => {
+                  const classes = [];
+                  if (arg.event.extendedProps.isUnavailability) classes.push('event-unavailability');
+                  else {
+                    const service = (arg.event.extendedProps.serviceType || '').toLowerCase();
+                    if (service.includes('barbe')) classes.push('event-coupe-barbe');
+                    else if (service.includes('coupe')) classes.push('event-coupe');
+                    else classes.push('event-booking');
+                  }
+                
+                  if (arg.event.extendedProps.isLocal) classes.push('event-local-only');
+                  if (arg.event.extendedProps.isOrphaned) classes.push('event-orphaned');
+                  return classes;
+                }}
+                height="auto"
+                slotMinTime={slotMinTime}
+                slotMaxTime={slotMaxTime}
+                allDaySlot={false}
+                hiddenDays={hiddenDays}
+                expandRows={true}
+                slotDuration="00:30:00"
+                slotLabelInterval="01:00"
+                nowIndicator={true}
+                eventMouseEnter={(info) => {
+                  const tooltip = document.createElement('div');
+                  tooltip.className = 'fc-event-tooltip animate-in fade-in zoom-in duration-200';
+                  tooltip.innerHTML = `
+                    <div class="font-bold mb-1">${info.event.title}</div>
+                    <div class="opacity-70">${info.event.extendedProps.serviceType || ''}</div>
+                    <div class="mt-2 text-[10px] opacity-50">
+                      ${new Date(info.event.start!).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} - 
+                      ${new Date(info.event.end!).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                     </div>
-                    <p className="text-[10px] text-muted-deep leading-tight">
-                      Vos réservations sont recopiées dans l'agenda ci-dessous, et <strong>tout événement de cet
-                      agenda bloque les créneaux du site</strong>. Pour qu'un événement ne bloque pas, marquez-le
-                      « Disponible » dans Google Agenda.
-                    </p>
-                    <button 
-                      onClick={connectGoogle}
-                      className="mt-3 text-[10px] uppercase tracking-widest font-bold text-muted-deep hover:text-dark transition-colors"
-                    >
-                      Changer de compte
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {calendars.length > 0 && (
-                <div className="pt-6 border-t border-dark/5 space-y-3">
-                  <label className="text-xs font-bold uppercase tracking-widest text-dark/40">Agenda utilisé par défaut</label>
-                  <select 
-                    value={settings?.google_calendar_id || 'primary'}
-                    onChange={(e) => updateSetting('google_calendar_id', e.target.value)}
-                    className="w-full min-w-0 bg-white border border-dark/10 py-2 px-3 rounded-[3px] text-sm outline-none focus:border-gold"
-                  >
-                    <option value="primary">Agenda Principal</option>
-                    {calendars.map(cal => (
-                      <option key={cal.id} value={cal.id}>{cal.summary}</option>
-                    ))}
-                  </select>
-                  <p className="text-[10px] text-dark/40 italic">
-                    Les événements de cet agenda bloquent les créneaux en ligne.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="glass-card rounded-[4px] p-5 md:p-8">
-            <h3 className="text-xl font-serif mb-6 flex items-center gap-2">
-              <Clock size={20} /> Horaires d'ouverture
-            </h3>
-            <div className="space-y-4">
-              {days.map(day => (
-                <div key={day} className="space-y-2 pb-4 border-b border-dark/5 last:border-0">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold uppercase tracking-widest">{dayLabels[day]}</span>
-                    <div className="flex items-center gap-3">
-                      <span className={`text-[10px] uppercase tracking-widest font-bold ${openingHours[day]?.closed ? 'text-red-500' : 'text-gold-deep'}`}>
-                        {openingHours[day]?.closed ? 'Fermé' : 'Ouvert'}
-                      </span>
-                      <button 
-                        onClick={() => updateOpeningHours(day, 'closed', !openingHours[day]?.closed)}
-                        className={`w-10 h-5 rounded-full transition-all relative hover:shadow-sm ${!openingHours[day]?.closed ? 'bg-dark' : 'bg-dark/10'}`}
-                      >
-                        <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${!openingHours[day]?.closed ? 'left-6' : 'left-1'}`}></div>
-                      </button>
-                    </div>
-                  </div>
-                  {!openingHours[day]?.closed && (
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2">
-                        <TimeInput 
-                          value={openingHours[day]?.open || '09:00'} 
-                          onChange={(val) => updateOpeningHours(day, 'open', val)}
-                          className="flex-1"
-                        />
-                        <span className="text-dark/20 font-bold">à</span>
-                        <TimeInput 
-                          value={openingHours[day]?.close || '19:00'} 
-                          onChange={(val) => updateOpeningHours(day, 'close', val)}
-                          className="flex-1"
-                        />
+                  `;
+                  tooltip.id = `tooltip-${info.event.id}`;
+                  document.body.appendChild(tooltip);
+                
+                  const updatePos = (e: MouseEvent) => {
+                    tooltip.style.left = `${e.clientX + 15}px`;
+                    tooltip.style.top = `${e.clientY + 15}px`;
+                  };
+                
+                  info.el.addEventListener('mousemove', updatePos);
+                  (info.el as any)._tooltipUpdatePos = updatePos;
+                }}
+                eventMouseLeave={(info) => {
+                  const tooltip = document.getElementById(`tooltip-${info.event.id}`);
+                  if (tooltip) tooltip.remove();
+                  info.el.removeEventListener('mousemove', (info.el as any)._tooltipUpdatePos);
+                }}
+                eventContent={(eventInfo) => {
+                  // La case fait la hauteur du rendez-vous : on n'affiche que ce qui y tient.
+                  // Sous 30 min, le nom passe avant l'heure (déjà lisible dans la grille).
+                  const start = eventInfo.event.start;
+                  const end = eventInfo.event.end;
+                  const minutes = start && end ? (end.getTime() - start.getTime()) / 60000 : 60;
+                  const serviceType = eventInfo.event.extendedProps.serviceType;
+                  return (
+                    <div className="flex flex-col h-full overflow-hidden justify-center">
+                      {minutes >= 30 && (
+                        <span className="fc-event-time">{eventInfo.timeText}</span>
+                      )}
+                      <div className="fc-event-title">
+                        {eventInfo.event.title}
                       </div>
-                      
-                      <div className="flex items-center justify-between pt-1">
-                        <span className="text-[10px] text-dark/40 uppercase tracking-widest font-bold">Pause déjeuner</span>
-                        <button 
-                          onClick={() => updateOpeningHours(day, 'has_break', !openingHours[day]?.has_break)}
-                          className={`w-8 h-4 rounded-full transition-all relative ${openingHours[day]?.has_break ? 'bg-gold' : 'bg-dark/10'}`}
-                        >
-                          <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${openingHours[day]?.has_break ? 'left-4.5' : 'left-0.5'}`}></div>
-                        </button>
-                      </div>
-
-                      {openingHours[day]?.has_break && (
-                        <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-300">
-                          <TimeInput 
-                            value={openingHours[day]?.break_start || '12:00'} 
-                            onChange={(val) => updateOpeningHours(day, 'break_start', val)}
-                            className="flex-1"
-                          />
-                          <span className="text-dark/20 text-[10px] font-bold">à</span>
-                          <TimeInput 
-                            value={openingHours[day]?.break_end || '14:00'} 
-                            onChange={(val) => updateOpeningHours(day, 'break_end', val)}
-                            className="flex-1"
-                          />
+                      {minutes >= 45 && serviceType && (
+                        <div className="text-[9px] opacity-40 uppercase tracking-tighter truncate mt-auto">
+                          {serviceType}
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
-              ))}
+                  );
+                }}
+                datesSet={(arg) => setCalendarView(arg.view.type)}
+                eventClick={(info) => {
+                  setSelectedEvent(info.event);
+                  setShowEventModal(true);
+                }}
+                dateClick={(info) => {
+                  // Cliquer dans le planning ouvre la saisie déjà posée sur le créneau.
+                  const pad = (n: number) => n.toString().padStart(2, '0');
+                  const d = info.date;
+                  openBookingModal({
+                    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+                    startTime: info.allDay ? undefined : `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+                  });
+                }}
+              />
             </div>
           </div>
 
-          <CategoryManager categories={categories} fetchCategories={fetchCategories} />
-
-          <div className="glass-card rounded-[4px] p-5 md:p-8">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-serif flex items-center gap-2">
-                <Scissors size={20} /> Gestion des Services
-              </h3>
-              <button 
-                onClick={handleAddService}
-                className="p-2 hover:bg-dark/5 rounded-full transition-colors text-gold"
-                title="Ajouter un service"
-              >
-                <Plus size={20} />
-              </button>
+          {/* Le récap du jour reste à côté du planning, pas en bas de page. */}
+          <div className="lg:col-span-3 min-w-0 lg:sticky lg:top-28">
+            <div className="glass-card rounded-[4px] p-5 md:p-8">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-serif flex items-center gap-2">
+                  <Calendar size={20} /> Aujourd'hui
+                </h3>
+                <button 
+                  onClick={fetchGoogleEvents}
+                  className="p-2 hover:bg-dark/5 rounded-full transition-colors text-dark/40 hover:text-gold"
+                  title="Rafraîchir"
+                >
+                  <Clock size={16} />
+                </button>
+              </div>
+              <div className="space-y-4">
+                {googleEvents.filter(e => {
+                  const eventDate = new Date(e.start);
+                  const today = new Date();
+                  return eventDate.getDate() === today.getDate() && 
+                         eventDate.getMonth() === today.getMonth() && 
+                         eventDate.getFullYear() === today.getFullYear() &&
+                         !e.extendedProps?.isUnavailability;
+                }).length === 0 ? (
+                  <div className="text-center py-4 text-dark/30 italic text-sm">Aucun rendez-vous aujourd'hui</div>
+                ) : (
+                  googleEvents
+                    .filter(e => {
+                      const eventDate = new Date(e.start);
+                      const today = new Date();
+                      return eventDate.getDate() === today.getDate() && 
+                             eventDate.getMonth() === today.getMonth() && 
+                             eventDate.getFullYear() === today.getFullYear() &&
+                             !e.extendedProps?.isUnavailability;
+                    })
+                    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+                    .map((e) => (
+                      <div 
+                        key={e.id} 
+                        className="p-4 rounded-[3px] bg-white border border-dark/5 text-sm hover:shadow-md transition-all cursor-pointer group"
+                        onClick={() => {
+                          // Find the event in the calendar and trigger click or just show modal
+                          const calendarApi = (document.querySelector('.admin-calendar .fc') as any)?._fullCalendarApi;
+                          if (calendarApi) {
+                            const event = calendarApi.getEventById(e.id);
+                            if (event) {
+                              setSelectedEvent(event);
+                              setShowEventModal(true);
+                            }
+                          } else {
+                            // Fallback if API not easily accessible
+                            setSelectedEvent({
+                              id: e.id,
+                              title: e.title,
+                              start: e.start,
+                              end: e.end,
+                              extendedProps: e.extendedProps
+                            });
+                            setShowEventModal(true);
+                          }
+                        }}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <div className="font-bold text-dark group-hover:text-gold transition-colors">{e.title}</div>
+                            <div className="text-[10px] text-dark/40 uppercase tracking-widest mt-0.5">{e.extendedProps?.serviceType}</div>
+                          </div>
+                          <div className="text-gold font-black text-base">
+                            {new Date(e.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                )}
+              </div>
             </div>
-            <div className="space-y-4">
-              {editingServices.map((service, index) => (
-                <div key={service.id || index} className="p-4 bg-white border border-dark/5 rounded-[4px] space-y-3">
-                  <div className="flex justify-between items-start gap-2">
-                    <input 
-                      type="text" 
-                      placeholder="Nom du service"
-                      value={service.name}
-                      onChange={(e) => handleServiceChange(index, 'name', e.target.value)}
-                      className="bg-transparent border-b border-dark/10 py-1 text-sm font-bold outline-none focus:border-gold w-full"
-                    />
+          </div>
+        </div>
+
+        {/* Sur téléphone, tout ce qui suit le planning est replié : ces cinq blocs
+            représentaient 5,5 écrans sur 7. Sur grand écran, rien ne change. */}
+        <button
+          type="button"
+          onClick={() => setShowSettings(!showSettings)}
+          aria-expanded={showSettings}
+          className="lg:hidden w-full glass-card rounded-[4px] px-5 py-4 flex items-center justify-between"
+        >
+          <span className="flex items-center gap-2 font-serif text-lg">
+            <Settings size={18} /> Réglages du salon
+          </span>
+          <ChevronRight size={18} className={`transition-transform ${showSettings ? 'rotate-90' : ''}`} />
+        </button>
+
+        <div className={`${showSettings ? 'block' : 'hidden'} lg:block space-y-8`}>
+          {/* Réglages du salon : trois colonnes au lieu d'une pile à faire défiler. */}
+          <div className="grid lg:grid-cols-12 gap-8 items-start">
+            <div className="lg:col-span-4 min-w-0">
+              <div className="glass-card rounded-[4px] p-5 md:p-8">
+                <h3 className="text-xl font-serif mb-6 flex items-center gap-2">
+                  <Settings size={20} /> Configuration
+                </h3>
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Afficher "Galerie"</span>
                     <button 
-                      onClick={() => handleRemoveService(index)}
-                      className="text-dark/20 hover:text-red-500 transition-colors"
+                      onClick={() => updateSetting('show_gallery', settings?.show_gallery === 'true' ? 'false' : 'true')}
+                      className={`w-12 h-6 rounded-full transition-colors relative ${settings?.show_gallery === 'true' ? 'bg-dark' : 'bg-dark/10'}`}
                     >
-                      <Trash2 size={16} />
+                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings?.show_gallery === 'true' ? 'left-7' : 'left-1'}`}></div>
                     </button>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-[10px] uppercase tracking-widest text-dark/40 font-bold">Prix (€)</label>
-                      <input 
-                        type="number" 
-                        value={isNaN(service.price) ? '' : service.price}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value);
-                          handleServiceChange(index, 'price', isNaN(val) ? 0 : val);
-                        }}
-                        className="w-full min-w-0 bg-dark/5 rounded-lg px-3 py-2 text-xs outline-none focus:bg-gold/10"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] uppercase tracking-widest text-dark/40 font-bold">Durée (min)</label>
-                      <input 
-                        type="number" 
-                        step="15"
-                        value={isNaN(service.duration) ? '' : service.duration}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value);
-                          handleServiceChange(index, 'duration', isNaN(val) ? 0 : val);
-                        }}
-                        className="w-full min-w-0 bg-dark/5 rounded-lg px-3 py-2 text-xs outline-none focus:bg-gold/10"
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] uppercase tracking-widest text-dark/40 font-bold">Catégorie</label>
-                    <select 
-                      value={service.category_id || ''}
-                      onChange={(e) => handleServiceChange(index, 'category_id', e.target.value)}
-                      className="w-full min-w-0 bg-dark/5 rounded-lg px-3 py-2 text-xs outline-none focus:bg-gold/10"
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Afficher "À propos"</span>
+                    <button 
+                      onClick={() => updateSetting('show_about', settings?.show_about === 'true' ? 'false' : 'true')}
+                      className={`w-12 h-6 rounded-full transition-colors relative ${settings?.show_about === 'true' ? 'bg-dark' : 'bg-dark/10'}`}
                     >
-                      <option value="">Sans catégorie</option>
-                      {categories.map(cat => (
-                        <option key={cat.id} value={cat.id}>{cat.name}</option>
-                      ))}
-                    </select>
+                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings?.show_about === 'true' ? 'left-7' : 'left-1'}`}></div>
+                    </button>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] uppercase tracking-widest text-dark/40 font-bold">Description (affichée dans la réservation)</label>
-                    <textarea
-                      value={service.description || ''}
-                      onChange={(e) => handleServiceChange(index, 'description', e.target.value)}
-                      placeholder="Ex. Rasoir traditionnel, serviette chaude"
-                      rows={2}
-                      className="w-full min-w-0 bg-dark/5 rounded-lg px-3 py-2 text-xs outline-none focus:bg-gold/10 resize-none"
-                    />
+
+                  {/* Horizon de réservation */}
+                  <div className="pt-6 border-t border-dark/5 space-y-2">
+                    <label htmlFor="horizon-weeks" className="text-[10px] uppercase tracking-widest text-dark/40 font-bold block">
+                      Réservation possible jusqu'à
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <select
+                        id="horizon-weeks"
+                        value={settings?.booking_horizon_weeks || '4'}
+                        onChange={(e) => updateSetting('booking_horizon_weeks', e.target.value)}
+                        className="bg-white border border-dark/10 py-2 px-3 rounded-[3px] text-sm outline-none focus:border-gold"
+                      >
+                        {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                          <option key={n} value={String(n)}>{n} {n > 1 ? 'semaines' : 'semaine'}</option>
+                        ))}
+                      </select>
+                      <span className="text-xs text-muted-deep">à l'avance</span>
+                    </div>
                   </div>
+
+                  {/* Changement du mot de passe admin */}
+                  <div className="pt-6 border-t border-dark/5 space-y-2">
+                    <label className="text-[10px] uppercase tracking-widest text-dark/40 font-bold">
+                      Changer le mot de passe gérant
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={newPassword}
+                        onChange={(e) => { setNewPassword(e.target.value); setPasswordMsg(null); }}
+                        placeholder="Nouveau mot de passe (8 caractères min.)"
+                        // min-w-0 : sans ça, la largeur minimale intrinsèque du champ
+                        // fait déborder la carte sur téléphone.
+                        className="flex-1 min-w-0 bg-dark/5 rounded-[3px] px-3 py-2 text-xs outline-none focus:bg-gold/10"
+                      />
+                      <button
+                        onClick={changePassword}
+                        disabled={newPassword.length < 8}
+                        className="btn-primary py-2 px-4 text-[10px] disabled:opacity-30 shrink-0"
+                      >
+                        Modifier
+                      </button>
+                    </div>
+                    {passwordMsg && (
+                      <p className={`text-xs ${passwordMsg.ok ? 'text-gold-deep' : 'text-red-500'}`}>{passwordMsg.text}</p>
+                    )}
+                  </div>
+
+                  <div className="pt-6 border-t border-dark/5 space-y-3">
+                    {calendars.length === 0 ? (
+                      <>
+                        <button
+                          onClick={connectGoogle}
+                          className="w-full flex items-center justify-center gap-2 border py-3 rounded-[3px] bg-white border-dark/10 hover:bg-dark/5 transition-colors text-sm font-medium"
+                        >
+                          <img src="https://www.google.com/favicon.ico" className="w-4 h-4" alt="Google" />
+                          Lier Google Calendar
+                        </button>
+                        <p className="text-[10px] text-muted-deep leading-tight">
+                          Facultatif — le planning et les réservations fonctionnent sans compte Google.
+                          Une fois lié : vos rendez-vous sont recopiés dans l'agenda choisi, et <strong>tout événement
+                          de cet agenda bloque les créneaux en ligne</strong> (pratique pour bloquer un créneau depuis
+                          votre téléphone). Un événement marqué « Disponible » ne bloque rien.
+                        </p>
+                      </>
+                    ) : (
+                      <div className="bg-paper border border-hairline rounded-[3px] p-4">
+                        <div className="flex items-center gap-2 text-gold-deep font-bold text-xs mb-1">
+                          <Check size={14} /> Google Calendar Connecté
+                        </div>
+                        <p className="text-[10px] text-muted-deep leading-tight">
+                          Vos réservations sont recopiées dans l'agenda ci-dessous, et <strong>tout événement de cet
+                          agenda bloque les créneaux du site</strong>. Pour qu'un événement ne bloque pas, marquez-le
+                          « Disponible » dans Google Agenda.
+                        </p>
+                        <button 
+                          onClick={connectGoogle}
+                          className="mt-3 text-[10px] uppercase tracking-widest font-bold text-muted-deep hover:text-dark transition-colors"
+                        >
+                          Changer de compte
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {calendars.length > 0 && (
+                    <div className="pt-6 border-t border-dark/5 space-y-3">
+                      <label className="text-xs font-bold uppercase tracking-widest text-dark/40">Agenda utilisé par défaut</label>
+                      <select 
+                        value={settings?.google_calendar_id || 'primary'}
+                        onChange={(e) => updateSetting('google_calendar_id', e.target.value)}
+                        className="w-full min-w-0 bg-white border border-dark/10 py-2 px-3 rounded-[3px] text-sm outline-none focus:border-gold"
+                      >
+                        <option value="primary">Agenda Principal</option>
+                        {calendars.map(cal => (
+                          <option key={cal.id} value={cal.id}>{cal.summary}</option>
+                        ))}
+                      </select>
+                      <p className="text-[10px] text-dark/40 italic">
+                        Les événements de cet agenda bloquent les créneaux en ligne.
+                      </p>
+                    </div>
+                  )}
                 </div>
-              ))}
+              </div>
+            </div>
+
+            <div className="lg:col-span-4 min-w-0">
+              <div className="glass-card rounded-[4px] p-5 md:p-8">
+                <h3 className="text-xl font-serif mb-6 flex items-center gap-2">
+                  <Clock size={20} /> Horaires d'ouverture
+                </h3>
+                {/* Une ligne par jour : le planning ne montre que les jours ouverts. */}
+                <div className="divide-y divide-dark/5">
+                  {days.map(day => {
+                    const hours = openingHours[day] || ({} as DayHours);
+                    return (
+                      <div key={day} className="py-2.5 first:pt-0 last:pb-0">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                          <button
+                            onClick={() => updateOpeningHours(day, 'closed', !hours.closed)}
+                            aria-label={`${hours.closed ? 'Ouvrir' : 'Fermer'} le ${dayLabels[day].toLowerCase()}`}
+                            className={`w-9 h-5 rounded-full transition-all relative shrink-0 hover:shadow-sm ${!hours.closed ? 'bg-dark' : 'bg-dark/10'}`}
+                          >
+                            <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${!hours.closed ? 'left-5' : 'left-1'}`}></div>
+                          </button>
+                          <span className={`text-xs font-bold uppercase tracking-widest ${hours.closed ? 'text-dark/30' : ''}`}>
+                            {dayLabels[day]}
+                          </span>
+                          {hours.closed ? (
+                            <span className="ml-auto text-[10px] uppercase tracking-widest font-bold text-dark/30">Fermé</span>
+                          ) : (
+                            <div className="ml-auto flex items-center gap-1.5">
+                              <TimeInput value={hours.open || '09:00'} onChange={(val) => updateOpeningHours(day, 'open', val)} />
+                              <span className="text-dark/20 text-xs">–</span>
+                              <TimeInput value={hours.close || '19:00'} onChange={(val) => updateOpeningHours(day, 'close', val)} />
+                            </div>
+                          )}
+                        </div>
+
+                        {!hours.closed && (
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mt-2 pl-6 sm:pl-12">
+                            <button
+                              onClick={() => updateOpeningHours(day, 'has_break', !hours.has_break)}
+                              aria-label={`${hours.has_break ? 'Retirer' : 'Ajouter'} la pause déjeuner du ${dayLabels[day].toLowerCase()}`}
+                              className={`w-7 h-3.5 rounded-full transition-all relative shrink-0 ${hours.has_break ? 'bg-gold' : 'bg-dark/10'}`}
+                            >
+                              <div className={`absolute top-0.5 w-2.5 h-2.5 bg-white rounded-full transition-all ${hours.has_break ? 'left-4' : 'left-0.5'}`}></div>
+                            </button>
+                            <span className="text-[10px] uppercase tracking-widest font-bold text-dark/40">Pause déjeuner</span>
+                            {hours.has_break && (
+                              <div className="ml-auto flex items-center gap-1.5 animate-in fade-in slide-in-from-top-1 duration-300">
+                                <TimeInput value={hours.break_start || '12:00'} onChange={(val) => updateOpeningHours(day, 'break_start', val)} />
+                                <span className="text-dark/20 text-xs">–</span>
+                                <TimeInput value={hours.break_end || '14:00'} onChange={(val) => updateOpeningHours(day, 'break_end', val)} />
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="lg:col-span-4 min-w-0">
+              <CategoryManager categories={categories} fetchCategories={fetchCategories} />
+            </div>
+          </div>
+
+            <div className="glass-card rounded-[4px] p-5 md:p-8">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-serif flex items-center gap-2">
+                  <Scissors size={20} /> Gestion des Services
+                </h3>
+                <button 
+                  onClick={handleAddService}
+                  className="p-2 hover:bg-dark/5 rounded-full transition-colors text-gold"
+                  title="Ajouter un service"
+                >
+                  <Plus size={20} />
+                </button>
+              </div>
+              <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {editingServices.map((service, index) => (
+                  <div key={service.id || index} className="p-4 bg-white border border-dark/5 rounded-[4px] space-y-3">
+                    <div className="flex justify-between items-start gap-2">
+                      <input 
+                        type="text" 
+                        placeholder="Nom du service"
+                        value={service.name}
+                        onChange={(e) => handleServiceChange(index, 'name', e.target.value)}
+                        className="bg-transparent border-b border-dark/10 py-1 text-sm font-bold outline-none focus:border-gold w-full"
+                      />
+                      <button 
+                        onClick={() => handleRemoveService(index)}
+                        className="text-dark/20 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[10px] uppercase tracking-widest text-dark/40 font-bold">Prix (€)</label>
+                        <input 
+                          type="number" 
+                          value={isNaN(service.price) ? '' : service.price}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            handleServiceChange(index, 'price', isNaN(val) ? 0 : val);
+                          }}
+                          className="w-full min-w-0 bg-dark/5 rounded-lg px-3 py-2 text-xs outline-none focus:bg-gold/10"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] uppercase tracking-widest text-dark/40 font-bold">Durée (min)</label>
+                        <input 
+                          type="number" 
+                          step="15"
+                          value={isNaN(service.duration) ? '' : service.duration}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value);
+                            handleServiceChange(index, 'duration', isNaN(val) ? 0 : val);
+                          }}
+                          className="w-full min-w-0 bg-dark/5 rounded-lg px-3 py-2 text-xs outline-none focus:bg-gold/10"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase tracking-widest text-dark/40 font-bold">Catégorie</label>
+                      <select 
+                        value={service.category_id || ''}
+                        onChange={(e) => handleServiceChange(index, 'category_id', e.target.value)}
+                        className="w-full min-w-0 bg-dark/5 rounded-lg px-3 py-2 text-xs outline-none focus:bg-gold/10"
+                      >
+                        <option value="">Sans catégorie</option>
+                        {categories.map(cat => (
+                          <option key={cat.id} value={cat.id}>{cat.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase tracking-widest text-dark/40 font-bold">Description (affichée dans la réservation)</label>
+                      <textarea
+                        value={service.description || ''}
+                        onChange={(e) => handleServiceChange(index, 'description', e.target.value)}
+                        placeholder="Ex. Rasoir traditionnel, serviette chaude"
+                        rows={2}
+                        className="w-full min-w-0 bg-dark/5 rounded-lg px-3 py-2 text-xs outline-none focus:bg-gold/10 resize-none"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
               <button 
                 onClick={saveServices}
-                className="w-full btn-primary py-3 rounded-[3px] text-sm font-bold shadow-sm"
+                className="w-full btn-primary py-3 rounded-[3px] text-sm font-bold shadow-sm mt-6"
               >
                 Enregistrer les services
               </button>
             </div>
-          </div>
 
-          <div className="glass-card rounded-[4px] p-5 md:p-8">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-serif flex items-center gap-2">
-                <Calendar size={20} /> Aujourd'hui
-              </h3>
-              <button 
-                onClick={fetchGoogleEvents}
-                className="p-2 hover:bg-dark/5 rounded-full transition-colors text-dark/40 hover:text-gold"
-                title="Rafraîchir"
-              >
-                <Clock size={16} />
-              </button>
-            </div>
-            <div className="space-y-4">
-              {googleEvents.filter(e => {
-                const eventDate = new Date(e.start);
-                const today = new Date();
-                return eventDate.getDate() === today.getDate() && 
-                       eventDate.getMonth() === today.getMonth() && 
-                       eventDate.getFullYear() === today.getFullYear() &&
-                       !e.extendedProps?.isUnavailability;
-              }).length === 0 ? (
-                <div className="text-center py-4 text-dark/30 italic text-sm">Aucun rendez-vous aujourd'hui</div>
-              ) : (
-                googleEvents
-                  .filter(e => {
-                    const eventDate = new Date(e.start);
-                    const today = new Date();
-                    return eventDate.getDate() === today.getDate() && 
-                           eventDate.getMonth() === today.getMonth() && 
-                           eventDate.getFullYear() === today.getFullYear() &&
-                           !e.extendedProps?.isUnavailability;
-                  })
-                  .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
-                  .map((e) => (
-                    <div 
-                      key={e.id} 
-                      className="p-4 rounded-[3px] bg-white border border-dark/5 text-sm hover:shadow-md transition-all cursor-pointer group"
-                      onClick={() => {
-                        // Find the event in the calendar and trigger click or just show modal
-                        const calendarApi = (document.querySelector('.admin-calendar .fc') as any)?._fullCalendarApi;
-                        if (calendarApi) {
-                          const event = calendarApi.getEventById(e.id);
-                          if (event) {
-                            setSelectedEvent(event);
-                            setShowEventModal(true);
-                          }
-                        } else {
-                          // Fallback if API not easily accessible
-                          setSelectedEvent({
-                            id: e.id,
-                            title: e.title,
-                            start: e.start,
-                            end: e.end,
-                            extendedProps: e.extendedProps
-                          });
-                          setShowEventModal(true);
-                        }
-                      }}
-                    >
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <div className="font-bold text-dark group-hover:text-gold transition-colors">{e.title}</div>
-                          <div className="text-[10px] text-dark/40 uppercase tracking-widest mt-0.5">{e.extendedProps?.serviceType}</div>
-                        </div>
-                        <div className="text-gold font-black text-base">
-                          {new Date(e.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                        </div>
-                      </div>
-                    </div>
-                  ))
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Main Calendar View */}
-        <div className="lg:col-span-8 space-y-8 min-w-0">
           <GalleryManager />
-          
-          <div className="glass-card rounded-[4px] p-4 md:p-8 admin-calendar">
-            <FullCalendar
-              plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-              initialView={window.innerWidth < 768 ? "timeGridDay" : "timeGridWeek"}
-              headerToolbar={window.innerWidth < 768 ? {
-                left: 'prev,next',
-                center: 'title',
-                right: 'timeGridDay,timeGridWeek'
-              } : {
-                left: 'prev,next today',
-                center: 'title',
-                right: 'dayGridMonth,timeGridWeek,timeGridDay'
-              }}
-              locale={frLocale}
-              events={googleEvents}
-              eventClassNames={(arg) => {
-                const classes = [];
-                if (arg.event.extendedProps.isUnavailability) classes.push('event-unavailability');
-                else {
-                  const service = (arg.event.extendedProps.serviceType || '').toLowerCase();
-                  if (service.includes('barbe')) classes.push('event-coupe-barbe');
-                  else if (service.includes('coupe')) classes.push('event-coupe');
-                  else classes.push('event-booking');
-                }
-                
-                if (arg.event.extendedProps.isLocal) classes.push('event-local-only');
-                if (arg.event.extendedProps.isOrphaned) classes.push('event-orphaned');
-                return classes;
-              }}
-              height={window.innerWidth < 768 ? "500px" : "650px"}
-              slotMinTime="08:00:00"
-              slotMaxTime="20:00:00"
-              allDaySlot={false}
-              expandRows={true}
-              slotDuration="00:30:00"
-              slotLabelInterval="01:00"
-              nowIndicator={true}
-              eventMouseEnter={(info) => {
-                const tooltip = document.createElement('div');
-                tooltip.className = 'fc-event-tooltip animate-in fade-in zoom-in duration-200';
-                tooltip.innerHTML = `
-                  <div class="font-bold mb-1">${info.event.title}</div>
-                  <div class="opacity-70">${info.event.extendedProps.serviceType || ''}</div>
-                  <div class="mt-2 text-[10px] opacity-50">
-                    ${new Date(info.event.start!).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} - 
-                    ${new Date(info.event.end!).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                  </div>
-                `;
-                tooltip.id = `tooltip-${info.event.id}`;
-                document.body.appendChild(tooltip);
-                
-                const updatePos = (e: MouseEvent) => {
-                  tooltip.style.left = `${e.clientX + 15}px`;
-                  tooltip.style.top = `${e.clientY + 15}px`;
-                };
-                
-                info.el.addEventListener('mousemove', updatePos);
-                (info.el as any)._tooltipUpdatePos = updatePos;
-              }}
-              eventMouseLeave={(info) => {
-                const tooltip = document.getElementById(`tooltip-${info.event.id}`);
-                if (tooltip) tooltip.remove();
-                info.el.removeEventListener('mousemove', (info.el as any)._tooltipUpdatePos);
-              }}
-              eventContent={(eventInfo) => {
-                return (
-                  <div className="flex flex-col h-full overflow-hidden">
-                    <div className="flex justify-between items-start">
-                      <span className="fc-event-time">
-                        {eventInfo.timeText}
-                      </span>
-                    </div>
-                    <div className="fc-event-title">
-                      {eventInfo.event.title}
-                    </div>
-                    {eventInfo.event.extendedProps.serviceType && (
-                      <div className="text-[9px] opacity-40 uppercase tracking-tighter truncate mt-auto">
-                        {eventInfo.event.extendedProps.serviceType}
-                      </div>
-                    )}
-                  </div>
-                );
-              }}
-              eventClick={(info) => {
-                setSelectedEvent(info.event);
-                setShowEventModal(true);
-              }}
-            />
-          </div>
         </div>
       </div>
 
@@ -1320,6 +1651,220 @@ const AdminDashboard = ({
                 )}
               </div>
             </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Rendez-vous pris au comptoir */}
+      <AnimatePresence>
+        {showBookingModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-6">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowBookingModal(false)}
+              className="absolute inset-0 bg-dark/60 backdrop-blur-sm"
+            />
+            <motion.form
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              onSubmit={(e) => { e.preventDefault(); addBooking(); }}
+              className="relative w-full max-w-3xl bg-paper rounded-[4px] p-6 md:p-8 shadow-2xl max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <h3 className="text-2xl font-serif">Nouveau rendez-vous</h3>
+                  <p className="text-[10px] uppercase tracking-widest text-dark/40 font-bold mt-1">Client au salon</p>
+                </div>
+                <button type="button" onClick={() => setShowBookingModal(false)} className="p-2 hover:bg-dark/5 rounded-full transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-6 md:gap-8">
+                {/* Le client */}
+                <div className="space-y-4">
+                  <div>
+                    <label htmlFor="booking-name" className="text-xs uppercase tracking-widest text-dark/50 mb-1 block">Nom du client</label>
+                    <input
+                      id="booking-name"
+                      type="text"
+                      autoFocus
+                      value={newBooking.customer_name}
+                      onChange={(e) => setNewBooking({ ...newBooking, customer_name: e.target.value })}
+                      placeholder="Ex. Julien Moreau"
+                      className="w-full min-w-0 bg-white border border-dark/10 rounded-[3px] px-4 py-2 outline-none focus:border-dark"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="booking-service" className="text-xs uppercase tracking-widest text-dark/50 mb-1 block">Prestation</label>
+                    <select
+                      id="booking-service"
+                      value={newBooking.service_id}
+                      onChange={(e) => setNewBooking({ ...newBooking, service_id: e.target.value })}
+                      className="w-full min-w-0 bg-white border border-dark/10 rounded-[3px] px-4 py-2 outline-none focus:border-dark"
+                    >
+                      {services.length === 0 && <option value="">Aucune prestation configurée</option>}
+                      {services.map(service => (
+                        <option key={service.id} value={service.id}>{service.name}</option>
+                      ))}
+                    </select>
+                    {/* La durée vient de la prestation : elle n'est pas saisie ici. */}
+                    {bookingService && (
+                      <p className="text-[10px] uppercase tracking-widest text-dark/40 font-bold mt-1.5">
+                        {bookingService.duration} min · {bookingService.price} €
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="pt-2 border-t border-dark/5 space-y-4">
+                    <div>
+                      <label htmlFor="booking-phone" className="text-xs uppercase tracking-widest text-dark/50 mb-1 block">
+                        Téléphone <span className="text-dark/30 normal-case tracking-normal">(facultatif)</span>
+                      </label>
+                      <input
+                        id="booking-phone"
+                        type="tel"
+                        value={newBooking.customer_phone}
+                        onChange={(e) => setNewBooking({ ...newBooking, customer_phone: e.target.value })}
+                        className="w-full min-w-0 bg-white border border-dark/10 rounded-[3px] px-4 py-2 outline-none focus:border-dark"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="booking-email" className="text-xs uppercase tracking-widest text-dark/50 mb-1 block">
+                        E-mail <span className="text-dark/30 normal-case tracking-normal">(facultatif)</span>
+                      </label>
+                      <input
+                        id="booking-email"
+                        type="email"
+                        value={newBooking.customer_email}
+                        onChange={(e) => setNewBooking({ ...newBooking, customer_email: e.target.value })}
+                        className="w-full min-w-0 bg-white border border-dark/10 rounded-[3px] px-4 py-2 outline-none focus:border-dark"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* La journée : ce qui est déjà pris, et ce qu'il reste */}
+                <div className="min-w-0">
+                  <div className="flex items-center justify-between mb-2">
+                    <button type="button" onClick={() => shiftBookingWeek(-1)} aria-label="Semaine précédente" className="p-1.5 hover:bg-dark/5 rounded-full transition-colors">
+                      <ChevronRight size={16} className="rotate-180" />
+                    </button>
+                    <span className="text-[10px] uppercase tracking-widest font-bold text-dark/40">
+                      {weekMonday.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} – {bookingWeekDays[6].toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
+                    </span>
+                    <button type="button" onClick={() => shiftBookingWeek(1)} aria-label="Semaine suivante" className="p-1.5 hover:bg-dark/5 rounded-full transition-colors">
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-7 gap-1">
+                    {bookingWeekDays.map(day => {
+                      const key = dateKey(day);
+                      const selected = key === newBooking.date;
+                      const closed = Boolean(openingHours[days[(day.getDay() + 6) % 7]]?.closed);
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => { shouldScrollSlots.current = true; setNewBooking({ ...newBooking, date: key }); }}
+                          title={closed ? 'Salon fermé' : undefined}
+                          className={`py-1.5 rounded-[3px] transition-colors ${selected ? 'bg-dark text-paper' : closed ? 'text-dark/25 hover:bg-dark/5' : 'text-dark/70 hover:bg-dark/5'}`}
+                        >
+                          <span className="block text-[9px] uppercase tracking-widest">{day.toLocaleDateString('fr-FR', { weekday: 'narrow' })}</span>
+                          <span className="block text-sm font-bold">{day.getDate()}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <p className="text-xs text-dark/50 mt-3 mb-1 capitalize">
+                    {parseDay(newBooking.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
+                    {dayClosed
+                      ? ' — fermé'
+                      : ` — ${dayHours?.open || '09:00'} à ${dayHours?.close || '19:00'}`}
+                  </p>
+
+                  <div ref={slotsRef} className="h-[280px] overflow-y-auto border border-dark/10 rounded-[3px] bg-white">
+                    {bookingSlots.map(slot => {
+                      const onTheHour = slot.at % 60 === 0;
+                      if (slot.busy) {
+                        return (
+                          <div
+                            key={slot.at}
+                            className={`flex items-center gap-2 px-2 h-7 text-[11px] border-l-2 ${onTheHour ? 'border-t border-t-dark/5' : ''} ${slot.busy.isUnavailability ? 'border-l-[#B23A2B] bg-[#F7EAE7]' : 'border-l-gold bg-gold/10'}`}
+                          >
+                            <span className="w-9 shrink-0 tabular-nums text-dark/40">{slot.startsBusy ? slot.label : ''}</span>
+                            {slot.startsBusy && (
+                              <span className="truncate font-bold text-dark/80">
+                                {slot.busy.title}
+                                {slot.busy.service && <span className="font-normal text-dark/40"> · {slot.busy.service}</span>}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      }
+                      const selected = slot.label === newBooking.startTime;
+                      const free = !slot.blocked && !slot.outside && !slot.past;
+                      return (
+                        <button
+                          key={slot.at}
+                          type="button"
+                          disabled={slot.blocked}
+                          data-selected={selected || undefined}
+                          data-free={free || undefined}
+                          onClick={() => setNewBooking({ ...newBooking, startTime: slot.label })}
+                          className={`flex w-full items-center gap-2 px-2 h-7 text-[11px] border-l-2 border-l-transparent transition-colors ${onTheHour ? 'border-t border-t-dark/5' : ''} ${
+                            selected
+                              ? 'bg-dark text-paper font-bold'
+                              : slot.blocked
+                                ? 'text-dark/20 cursor-not-allowed'
+                                : free
+                                  ? 'text-dark/70 hover:bg-gold/20'
+                                  : 'text-dark/30 hover:bg-dark/5'
+                          }`}
+                        >
+                          <span className="w-9 shrink-0 tabular-nums">{slot.label}</span>
+                          <span className="truncate">
+                            {slot.blocked
+                              ? `pas la place (${bookingDuration} min)`
+                              : slot.past ? 'passé'
+                              : dayClosed ? 'fermé'
+                              : slot.inBreak ? 'pause déjeuner'
+                              : slot.outside ? 'hors horaires'
+                              : ''}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {bookingWarning && (
+                    <p className="text-xs text-gold-deep bg-gold/10 border-l-2 border-gold px-3 py-2 mt-3">
+                      {bookingWarning} Le rendez-vous sera quand même enregistré.
+                    </p>
+                  )}
+                  {bookingError && (
+                    <p className="text-xs text-red-600 bg-red-50 border-l-2 border-red-500 px-3 py-2 mt-3">{bookingError}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex gap-4 mt-8">
+                <button type="button" onClick={() => setShowBookingModal(false)} className="flex-1 btn-outline">Annuler</button>
+                <button
+                  type="submit"
+                  disabled={isSavingBooking || !newBooking.customer_name.trim() || !newBooking.service_id}
+                  className="flex-1 btn-primary disabled:opacity-30"
+                >
+                  {isSavingBooking ? 'Enregistrement...' : `Enregistrer · ${newBooking.startTime}`}
+                </button>
+              </div>
+            </motion.form>
           </div>
         )}
       </AnimatePresence>

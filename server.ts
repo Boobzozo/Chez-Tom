@@ -525,6 +525,67 @@ function computeFreeSlots(date: string, duration: number, extraBusy: BusyRange[]
   return slots;
 }
 
+/**
+ * Réservation ou indisponibilité qui chevauche [start, end[. Les horodatages sont des
+ * heures murales locales « AAAA-MM-JJTHH:MM:SS » : leur ordre lexicographique est aussi
+ * leur ordre chronologique, la comparaison SQL suffit.
+ */
+function findOverlap(startIso: string, endIso: string) {
+  const booking = db.prepare(
+    "SELECT customer_name AS label, start_time FROM bookings WHERE status = 'confirmed' AND start_time < ? AND end_time > ?"
+  ).get(endIso, startIso) as { label: string; start_time: string } | undefined;
+  if (booking) return { kind: "booking" as const, ...booking };
+
+  const block = db.prepare(
+    "SELECT summary AS label, start_time FROM blocks WHERE start_time < ? AND end_time > ?"
+  ).get(endIso, startIso) as { label: string; start_time: string } | undefined;
+  if (block) return { kind: "block" as const, ...block };
+
+  return null;
+}
+
+/**
+ * E-mail de confirmation au client. Partagé par la réservation en ligne et celle saisie
+ * au comptoir : un seul gabarit à maintenir. Sans clé Resend, ne fait rien.
+ * Tout ce qui vient du client ou de la base est échappé : sinon, n'importe qui peut faire
+ * envoyer par le salon un e-mail au contenu arbitraire.
+ */
+async function sendBookingConfirmationEmail(opts: {
+  to: string; customerName: string; serviceType: string; dateStr: string; timeStr: string;
+}) {
+  if (!resend) return;
+  try {
+    const svc = db.prepare("SELECT description FROM services WHERE name = ?").get(opts.serviceType) as { description?: string } | undefined;
+    const descLine = svc?.description
+      ? `<p style="margin: 5px 0; color:#6E6A63;">${escapeHtml(svc.description)}</p>`
+      : '';
+    await resend.emails.send({
+      from: MAIL_FROM,
+      to: opts.to,
+      subject: 'Confirmation de votre rendez-vous - Tom Barber',
+      html: `
+                <div style="font-family: Georgia, serif; color: #1A1A1A; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #E2DACB;">
+                  <h1 style="text-align: center; color: #A8884A; letter-spacing: 0.2em; font-weight: 400;">TOM BARBER</h1>
+                  <p>Bonjour <strong>${escapeHtml(opts.customerName)}</strong>,</p>
+                  <p>Votre rendez-vous est confirmé. Nous avons hâte de vous accueillir.</p>
+                  <div style="background-color: #F5F1EA; padding: 18px; margin: 20px 0; border-left: 3px solid #C8A968;">
+                    <p style="margin: 5px 0;"><strong>Prestation :</strong> ${escapeHtml(opts.serviceType)}</p>
+                    ${descLine}
+                    <p style="margin: 5px 0;"><strong>Date :</strong> ${escapeHtml(opts.dateStr)}</p>
+                    <p style="margin: 5px 0;"><strong>Heure :</strong> ${escapeHtml(opts.timeStr)}</p>
+                  </div>
+                  <p style="font-size: 14px; color: #6E6A63;">Adresse : Martigné-sur-Mayenne, 53470</p>
+                  <p style="font-size: 14px; color: #6E6A63;">Téléphone : 01 23 45 67 89</p>
+                  <hr style="border: 0; border-top: 1px solid #E2DACB; margin: 20px 0;" />
+                  <p style="text-align: center; font-size: 12px; color: #8A857C;">&copy; ${new Date().getFullYear()} Tom Barber. Tous droits réservés.</p>
+                </div>
+              `
+    });
+  } catch (emailErr) {
+    console.error("Email error:", emailErr);
+  }
+}
+
 async function startServer() {
   const app = express();
   const server = http.createServer(app);
@@ -749,41 +810,14 @@ async function startServer() {
           minute: '2-digit' 
         });
 
-        // 1. Email to Customer (if Resend is configured)
-        if (resend) {
-          try {
-            const svc = db.prepare("SELECT description FROM services WHERE name = ?").get(service_type) as { description?: string } | undefined;
-            // Tout ce qui vient du client ou de la base est échappé : sinon, n'importe qui
-            // peut faire envoyer par le salon un email au contenu arbitraire.
-            const descLine = svc?.description
-              ? `<p style="margin: 5px 0; color:#6E6A63;">${escapeHtml(svc.description)}</p>`
-              : '';
-            await resend.emails.send({
-              from: MAIL_FROM,
-              to: customer_email,
-              subject: 'Confirmation de votre rendez-vous - Tom Barber',
-              html: `
-                <div style="font-family: Georgia, serif; color: #1A1A1A; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #E2DACB;">
-                  <h1 style="text-align: center; color: #A8884A; letter-spacing: 0.2em; font-weight: 400;">TOM BARBER</h1>
-                  <p>Bonjour <strong>${escapeHtml(customer_name)}</strong>,</p>
-                  <p>Votre rendez-vous est confirmé. Nous avons hâte de vous accueillir.</p>
-                  <div style="background-color: #F5F1EA; padding: 18px; margin: 20px 0; border-left: 3px solid #C8A968;">
-                    <p style="margin: 5px 0;"><strong>Prestation :</strong> ${escapeHtml(service_type)}</p>
-                    ${descLine}
-                    <p style="margin: 5px 0;"><strong>Date :</strong> ${escapeHtml(dateStr)}</p>
-                    <p style="margin: 5px 0;"><strong>Heure :</strong> ${escapeHtml(timeStr)}</p>
-                  </div>
-                  <p style="font-size: 14px; color: #6E6A63;">Adresse : Martigné-sur-Mayenne, 53470</p>
-                  <p style="font-size: 14px; color: #6E6A63;">Téléphone : 01 23 45 67 89</p>
-                  <hr style="border: 0; border-top: 1px solid #E2DACB; margin: 20px 0;" />
-                  <p style="text-align: center; font-size: 12px; color: #8A857C;">&copy; ${new Date().getFullYear()} Tom Barber. Tous droits réservés.</p>
-                </div>
-              `
-            });
-          } catch (emailErr) {
-            console.error("Email error:", emailErr);
-          }
-        }
+        // 1. Confirmation au client (sans clé Resend, ne fait rien)
+        await sendBookingConfirmationEmail({
+          to: customer_email,
+          customerName: customer_name,
+          serviceType: service_type,
+          dateStr,
+          timeStr,
+        });
 
         // 2. Webhooks n8n (non bloquants, désactivés si l'URL n'est pas configurée)
         const webhookUrl = N8N_BOOKING_WEBHOOK_URL;
@@ -872,6 +906,175 @@ async function startServer() {
     } catch (err: any) {
       console.error("Erreur lors de la réservation:", err.response?.data || err.message);
       res.status(500).json({ error: "Une erreur est survenue lors de la réservation." });
+    }
+  });
+
+  /**
+   * Réservation saisie au comptoir par le gérant. Volontairement distincte de la route
+   * publique : un client devant le fauteuil ne donne pas forcément son e-mail, le gérant
+   * n'a pas à subir la limite de débit anti-abus, et il doit pouvoir caser quelqu'un
+   * pendant la pause ou juste après la fermeture. Seul le chevauchement reste refusé :
+   * deux clients sur le même créneau, c'est une faute de frappe, jamais une intention.
+   */
+  app.post("/api/admin/bookings", requireAdmin, async (req, res) => {
+    try {
+      const {
+        customer_name, customer_email, customer_phone,
+        service_id, start_time: requestedStart, duration: requestedDuration,
+      } = req.body ?? {};
+
+      if (typeof customer_name !== "string" || !customer_name.trim() || customer_name.length > 100) {
+        return res.status(400).json({ error: "Nom du client manquant." });
+      }
+      const email = typeof customer_email === "string" ? customer_email.trim() : "";
+      if (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+        return res.status(400).json({ error: "Adresse e-mail invalide." });
+      }
+      const phone = typeof customer_phone === "string" ? customer_phone.trim() : "";
+      if (phone.length > 30) {
+        return res.status(400).json({ error: "Numéro de téléphone invalide." });
+      }
+
+      const service = db.prepare("SELECT * FROM services WHERE id = ?")
+        .get(typeof service_id === "string" ? service_id : "") as ServiceRow | undefined;
+      if (!service) {
+        return res.status(400).json({ error: "Prestation inconnue." });
+      }
+
+      // Durée : celle de la prestation, sauf ajustement explicite (un habitué va plus vite).
+      const duration = Number.isInteger(requestedDuration) && requestedDuration >= 5 && requestedDuration <= 480
+        ? requestedDuration as number
+        : service.duration;
+      if (!Number.isInteger(duration) || duration <= 0 || duration > 480) {
+        return res.status(400).json({ error: "Durée invalide." });
+      }
+
+      const match = typeof requestedStart === "string" && /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::00)?$/.exec(requestedStart);
+      if (!match) {
+        return res.status(400).json({ error: "Créneau invalide." });
+      }
+      const [, date, slot] = match;
+      const startDate = new Date(`${date}T${slot}:00`);
+      if (isNaN(startDate.getTime()) || toLocalIso(startDate) !== `${date}T${slot}:00`) {
+        return res.status(400).json({ error: "Créneau invalide." });
+      }
+      const start_time = `${date}T${slot}:00`;
+      const end_time = toLocalIso(new Date(startDate.getTime() + duration * 60_000));
+
+      // Vérification et écriture dans la même transaction : deux saisies simultanées ne
+      // peuvent pas aboutir sur le même créneau.
+      let conflict: ReturnType<typeof findOverlap> = null;
+      const insert = db.transaction((): number | bigint | null => {
+        conflict = findOverlap(start_time, end_time);
+        if (conflict) return null;
+        return db.prepare(`
+          INSERT INTO bookings (customer_name, customer_email, customer_phone, service_type, start_time, end_time, google_event_id, sms_opt_in)
+          VALUES (?, ?, ?, ?, ?, ?, NULL, 0)
+        `).run(
+          customer_name.trim(),
+          // La colonne est NOT NULL depuis l'origine : chaîne vide plutôt qu'une migration
+          // de table sur une base en production. Le reste du code traite "" comme « pas d'e-mail ».
+          email,
+          phone || null,
+          service.name,
+          start_time,
+          end_time,
+        ).lastInsertRowid;
+      });
+
+      const localId = insert();
+      if (localId === null) {
+        const c = conflict as NonNullable<ReturnType<typeof findOverlap>>;
+        const at = c.start_time.slice(11, 16);
+        return res.status(409).json({
+          error: c.kind === "block"
+            ? `Ce créneau est déjà bloqué (${c.label}, à ${at}).`
+            : `${c.label} a déjà un rendez-vous sur ce créneau (à ${at}).`,
+        });
+      }
+
+      // Tâches secondaires — non bloquantes, le rendez-vous est déjà enregistré.
+      (async () => {
+        try {
+          const dateStr = startDate.toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+          const timeStr = startDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+          if (email) {
+            await sendBookingConfirmationEmail({
+              to: email,
+              customerName: customer_name.trim(),
+              serviceType: service.name,
+              dateStr,
+              timeStr,
+            });
+          }
+
+          // Le rendez-vous part dans l'agenda Google, mais une seule fois : si n8n est
+          // branché, c'est lui qui crée l'événement (et la ligne du tableur) ; sinon le
+          // serveur le recopie lui-même, comme il le fait pour les indisponibilités.
+          if (N8N_BOOKING_WEBHOOK_URL) {
+            try {
+              const response = await axios.post(N8N_BOOKING_WEBHOOK_URL, {
+                event: 'booking.created',
+                data: {
+                  booking_id: localId,
+                  source: 'admin',
+                  customer_name: customer_name.trim(),
+                  customer_email: email,
+                  customer_phone: phone,
+                  service_id: service.id,
+                  service_type: service.name,
+                  duration,
+                  price: service.price,
+                  start_time,
+                  end_time,
+                  sms_opt_in: false,
+                  formatted_date: dateStr,
+                  formatted_time: timeStr,
+                },
+              }, { timeout: 15000 });
+              if (response.data?.google_event_id) {
+                db.prepare("UPDATE bookings SET google_event_id = ? WHERE id = ?").run(response.data.google_event_id, localId);
+              }
+            } catch (webhookErr: any) {
+              console.error("Webhook error:", webhookErr.response?.status || webhookErr.message);
+            }
+          } else {
+            try {
+              const token = await getGoogleAccessToken();
+              if (token) {
+                const response = await axios.post(
+                  `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(resolveCalendarId())}/events`,
+                  {
+                    summary: `${customer_name.trim()} (${service.name})`,
+                    description: phone ? `Rendez-vous pris au salon — ${phone}` : "Rendez-vous pris au salon",
+                    start: { dateTime: start_time, timeZone: "Europe/Paris" },
+                    end: { dateTime: end_time, timeZone: "Europe/Paris" },
+                  },
+                  { headers: { Authorization: `Bearer ${token}` } }
+                );
+                db.prepare("UPDATE bookings SET google_event_id = ? WHERE id = ?").run(response.data.id, localId);
+              }
+            } catch (err: any) {
+              console.error("Miroir Google du rendez-vous impossible:", err.response?.data || err.message);
+            }
+          }
+        } catch (err) {
+          console.error("Secondary tasks error:", err);
+        }
+      })();
+
+      res.status(201).json({
+        success: true,
+        id: localId,
+        customer_name: customer_name.trim(),
+        service: service.name,
+        start_time,
+        end_time,
+      });
+    } catch (err: any) {
+      console.error("Erreur lors de l'ajout du rendez-vous:", err.response?.data || err.message);
+      res.status(500).json({ error: "Une erreur est survenue lors de l'enregistrement." });
     }
   });
 

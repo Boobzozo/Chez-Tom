@@ -194,7 +194,7 @@
 .admin-calendar .fc-event {
   @apply shadow-sm;
   border-radius: 3px !important;
-  padding: 4px 8px !important;
+  padding: 2px 6px !important;
   border: 1px solid rgba(0, 0, 0, 0.05) !important;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -243,19 +243,23 @@
 }
 
 .admin-calendar .fc-event-time {
-  @apply font-medium block mb-0.5 opacity-60;
-  font-size: 10px !important;
+  @apply font-medium block opacity-60;
+  font-size: 9px !important;
+  line-height: 1.25 !important;
   color: #1a1a1a !important;
 }
 
 .admin-calendar .fc-event-title {
   @apply font-semibold block leading-tight truncate;
-  font-size: 12px !important;
+  font-size: 11px !important;
+  line-height: 1.25 !important;
   color: #1a1a1a !important;
 }
 
+/* Hauteur d'un créneau de 30 min. Volontairement serrée : combinée à la plage
+   d'ouverture réelle, une journée entière tient à l'écran sans défilement interne. */
 .admin-calendar .fc-timegrid-slot {
-  height: 60px !important; /* More airy */
+  height: 30px !important;
 }
 
 .admin-calendar .fc-timegrid-slot-minor {
@@ -328,7 +332,7 @@
 /* Mobile Calendar Adjustments */
 @media (max-width: 767px) {
   .admin-calendar .fc-toolbar-title {
-    font-size: 1.1rem !important;
+    font-size: 0.95rem !important;
   }
   
   .admin-calendar .fc-col-header-cell-cushion {
@@ -336,8 +340,16 @@
     padding: 4px 0 !important;
   }
   
+  /* Une journée d'ouverture entière doit tenir dans un écran de téléphone :
+     20 créneaux de 30 min × 28 px ≈ 560 px. C'est ça, la réponse au « zoom ». */
   .admin-calendar .fc-timegrid-slot {
-    height: 40px !important;
+    height: 28px !important;
+  }
+
+  /* Case trop basse pour deux lignes : le nom passe avant l'heure, que la position
+     dans la grille donne déjà. FullCalendar pose la classe sous ~30 px de haut. */
+  .admin-calendar .fc-timegrid-event-short .fc-event-time {
+    display: none !important;
   }
   
   .admin-calendar .fc-event-title {
@@ -348,13 +360,28 @@
     font-size: 9px !important;
   }
 
+  /* Resserré au point que « ‹ › Aujourd'hui » et la date tiennent sur une ligne :
+     au-delà, la barre repasse à trois lignes et coûte 100 px. */
   .admin-calendar .fc-button {
-    padding: 0.4rem 0.6rem !important;
-    font-size: 0.65rem !important;
+    padding: 0.35rem 0.5rem !important;
+    font-size: 0.6rem !important;
+    letter-spacing: 0.08em !important;
   }
 
+  /* Trois lignes empilées coûtaient 100 px. Flèches et date sur une ligne, choix
+     de la vue sur la suivante : ~64 px. */
   .admin-calendar .fc-header-toolbar {
-    flex-direction: column;
-    gap: 0.5rem;
+    flex-wrap: wrap;
+    gap: 0.5rem 0;
+    margin-bottom: 0.75rem !important;
   }
+
+  .admin-calendar .fc-toolbar-chunk:last-child {
+    flex-basis: 100%;
+    display: flex;
+    justify-content: center;
+  }
+
+  .admin-calendar .fc-toolbar-chunk .fc-button-group { gap: 0; }
+
 }

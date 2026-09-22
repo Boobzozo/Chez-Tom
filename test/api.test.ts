@@ -240,6 +240,65 @@ test("réglage : l'horizon de réservation est borné (1 à 12 semaines)", async
   assert.equal((await api("POST", "/api/settings", { key: "booking_horizon_weeks", value: "4" }, adminToken)).status, 200);
 });
 
+const walkIn = (overrides: Record<string, unknown> = {}, token = adminToken) =>
+  api("POST", "/api/admin/bookings", {
+    customer_name: "Client Comptoir",
+    service_id: "coupe-homme", // 30 min
+    start_time: `${MONDAY}T16:00:00`,
+    ...overrides,
+  }, token);
+
+test("comptoir : rendez-vous enregistré sans e-mail, il bloque le créneau du site", async () => {
+  const { status, data } = await walkIn();
+  assert.equal(status, 201, JSON.stringify(data));
+  assert.equal(data.service, "Coupe Homme");
+  assert.equal(data.end_time, `${MONDAY}T16:30:00`);
+
+  const avail = await api("GET", `/api/availability?date=${MONDAY}&duration=30`);
+  assert.ok(!avail.data.slots.includes("16:00"), "16:00 doit disparaître du site");
+  assert.equal((await book({ start_time: `${MONDAY}T16:00:00` })).status, 409);
+
+  // Le rendez-vous est bien celui du comptoir, et sans adresse e-mail.
+  const list = await api("GET", `/api/bookings?date=${MONDAY}`, undefined, adminToken);
+  const row = list.data.find((b: any) => b.id === data.id);
+  assert.equal(row.customer_name, "Client Comptoir");
+  assert.equal(row.customer_email, "");
+});
+
+test("comptoir : le gérant passe outre les horaires, jamais le chevauchement", async () => {
+  // Après la fermeture (19:00) : refusé au client en ligne, accepté au comptoir.
+  assert.equal((await book({ start_time: `${MONDAY}T20:00:00` })).status, 409);
+  assert.equal((await walkIn({ start_time: `${MONDAY}T20:00:00` })).status, 201);
+
+  // Chevauchement avec le rendez-vous de 16:00 : refusé, avec le nom du client déjà pris.
+  const clash = await walkIn({ start_time: `${MONDAY}T16:15:00` });
+  assert.equal(clash.status, 409);
+  assert.match(clash.data.error, /Client Comptoir/);
+
+  // Chevauchement avec une indisponibilité : refusé aussi.
+  const block = await api("POST", "/api/blocks", { summary: "Dentiste", start: `${MONDAY}T17:00:00`, end: `${MONDAY}T18:00:00` }, adminToken);
+  assert.equal(block.status, 201);
+  const onBlock = await walkIn({ start_time: `${MONDAY}T17:30:00` });
+  assert.equal(onBlock.status, 409);
+  assert.match(onBlock.data.error, /Dentiste/);
+  assert.equal((await api("DELETE", `/api/blocks/${block.data.id}`, undefined, adminToken)).status, 200);
+});
+
+test("comptoir : durée ajustable, entrées invalides refusées, token obligatoire", async () => {
+  const short = await walkIn({ start_time: `${MONDAY}T18:00:00`, duration: 15 });
+  assert.equal(short.status, 201, JSON.stringify(short.data));
+  assert.equal(short.data.end_time, `${MONDAY}T18:15:00`);
+
+  assert.equal((await walkIn({ customer_name: "  " })).status, 400);
+  assert.equal((await walkIn({ service_id: "inexistant" })).status, 400);
+  assert.equal((await walkIn({ start_time: "lundi 16h" })).status, 400);
+  assert.equal((await walkIn({ start_time: `${MONDAY}T18:30:00`, customer_email: "pas-une-adresse" })).status, 400);
+  const noToken = await api("POST", "/api/admin/bookings", {
+    customer_name: "Sans jeton", service_id: "coupe-homme", start_time: `${MONDAY}T18:30:00`,
+  });
+  assert.equal(noToken.status, 401);
+});
+
 test("mot de passe : le défaut doit être remplacé, jamais réutilisé", async () => {
   const same = await api("POST", "/api/settings", { key: "admin_password", value: DEFAULT_PASSWORD }, adminToken);
   assert.equal(same.status, 400);

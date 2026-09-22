@@ -23,14 +23,18 @@ const Navbar = ({ isAdmin }: { isAdmin: boolean }) => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  // L'espace gérant n'a pas de hero sombre derrière la barre : sans ça, le logo
+  // s'affiche en crème sur crème et seuls les « T » et « B » dorés restent visibles.
+  const onLight = scrolled || isAdmin;
+
   return (
-    <nav className={`fixed top-0 left-0 right-0 z-50 px-6 py-4 transition-all duration-500 ${scrolled ? 'bg-paper/90 backdrop-blur-md shadow-sm' : 'bg-transparent'}`}>
+    <nav className={`fixed top-0 left-0 right-0 z-50 px-6 py-4 transition-all duration-500 ${onLight ? 'bg-paper/90 backdrop-blur-md shadow-sm' : 'bg-transparent'}`}>
       <div className="max-w-7xl mx-auto flex justify-between items-center">
         <a
           href="#"
           aria-label="Tom Barber — accueil"
           className="brand-logo font-bold text-2xl md:text-4xl transition-colors duration-500"
-          style={{ color: scrolled ? 'var(--color-dark)' : 'var(--color-paper)' }}
+          style={{ color: onLight ? 'var(--color-dark)' : 'var(--color-paper)' }}
         >
           <span className="lead">T</span><span className="ltr">o</span><span className="ltr">m</span><span className="ltr sp"> </span><span className="lead">B</span><span className="ltr">a</span><span className="ltr">r</span><span className="ltr">b</span><span className="ltr">e</span><span className="ltr">r</span>
         </a>
@@ -39,7 +43,7 @@ const Navbar = ({ isAdmin }: { isAdmin: boolean }) => {
         {isAdmin ? (
           <a
             href="/"
-            className={`text-xs uppercase tracking-widest font-medium transition-colors hover:text-gold ${scrolled ? 'text-dark' : 'text-paper'}`}
+            className={`text-xs uppercase tracking-widest font-medium transition-colors hover:text-gold ${onLight ? 'text-dark' : 'text-paper'}`}
           >
             Voir le site
           </a>
