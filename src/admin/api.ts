@@ -20,7 +20,7 @@ export const adminFetch = (input: RequestInfo | URL, init: RequestInit = {}) => 
 /** Tente la connexion ; stocke le token si OK, sinon renvoie le message d'erreur. */
 export const adminLogin = async (
   password: string,
-): Promise<{ ok: boolean; error?: string; mustChangePassword?: boolean }> => {
+): Promise<{ ok: boolean; error?: string; mustChangePassword?: boolean; retryAfter?: number }> => {
   try {
     const res = await fetch('/api/admin/login', {
       method: 'POST',
@@ -31,6 +31,12 @@ export const adminLogin = async (
     if (res.ok && data.token) {
       setAdminToken(data.token);
       return { ok: true, mustChangePassword: data.mustChangePassword === true };
+    }
+    // 429 : le serveur indique combien de secondes attendre avant de réessayer.
+    if (res.status === 429) {
+      const header = Number(res.headers.get('Retry-After'));
+      const retryAfter = Number(data.retryAfter) || (header > 0 ? header : 0);
+      return { ok: false, error: data.error || 'Trop de tentatives.', retryAfter };
     }
     return { ok: false, error: data.error || 'Mot de passe incorrect' };
   } catch {

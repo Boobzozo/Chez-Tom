@@ -311,22 +311,57 @@ const requireAdmin = (req: express.Request, res: express.Response, next: express
   next();
 };
 
-// Rate limiting simple en mémoire (par IP).
+// Rate limiting simple en mémoire (par IP). Fenêtre fixe : elle démarre au
+// premier essai compté et ne se prolonge pas si l'on continue à insister.
 const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+const rateKey = (bucket: string, req: express.Request) => `${bucket}:${req.ip}`;
+
+/** Secondes restantes avant déblocage, ou 0 si la voie est libre. */
+const rateRetryAfter = (bucket: string, req: express.Request, maxAttempts: number) => {
+  if (IS_TEST) return 0;
+  const entry = rateBuckets.get(rateKey(bucket, req));
+  if (!entry) return 0;
+  const remaining = entry.resetAt - Date.now();
+  if (remaining <= 0 || entry.count < maxAttempts) return 0;
+  return Math.ceil(remaining / 1000);
+};
+
+/** Compte un essai. À n'appeler que sur ce qu'on veut réellement limiter. */
+const rateConsume = (bucket: string, req: express.Request, windowMs: number) => {
+  if (IS_TEST) return;
+  const key = rateKey(bucket, req);
+  const now = Date.now();
+  const entry = rateBuckets.get(key);
+  if (!entry || now > entry.resetAt) rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+  else entry.count++;
+};
+
+const rateReset = (bucket: string, req: express.Request) =>
+  rateBuckets.delete(rateKey(bucket, req));
+
+/** « dans 12 minutes » / « dans quelques secondes » — pour un message lisible. */
+const formatDelay = (seconds: number) => {
+  if (seconds <= 60) return "dans quelques secondes";
+  const minutes = Math.ceil(seconds / 60);
+  return `dans ${minutes} minute${minutes > 1 ? "s" : ""}`;
+};
+
+/** Réponse 429 commune : en-tête standard + message daté côté client. */
+const tooManyAttempts = (res: express.Response, retryAfter: number) => {
+  res.setHeader("Retry-After", String(retryAfter));
+  return res.status(429).json({
+    error: `Trop de tentatives. Réessayez ${formatDelay(retryAfter)}.`,
+    retryAfter,
+  });
+};
+
+/** Limiteur « tout compte » : convient aux actions légitimes mais spammables. */
 const rateLimit = (bucket: string, maxAttempts: number, windowMs: number) =>
   (req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (IS_TEST) return next();
-    const key = `${bucket}:${req.ip}`;
-    const now = Date.now();
-    const entry = rateBuckets.get(key);
-    if (!entry || now > entry.resetAt) {
-      rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
-      return next();
-    }
-    entry.count++;
-    if (entry.count > maxAttempts) {
-      return res.status(429).json({ error: "Trop de tentatives. Réessayez plus tard." });
-    }
+    const retryAfter = rateRetryAfter(bucket, req, maxAttempts);
+    if (retryAfter) return tooManyAttempts(res, retryAfter);
+    rateConsume(bucket, req, windowMs);
     next();
   };
 
@@ -635,12 +670,23 @@ async function startServer() {
   });
 
   // --- Authentification admin ---
-  app.post("/api/admin/login", rateLimit("login", 5, 15 * 60 * 1000), (req, res) => {
+  // Seuls les ÉCHECS sont comptés : Tom se reconnecte plusieurs fois par jour
+  // depuis le salon, compter les réussites le bloquerait sans rien protéger.
+  const LOGIN_MAX_ATTEMPTS = 5;
+  const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+
+  app.post("/api/admin/login", (req, res) => {
+    const retryAfter = rateRetryAfter("login", req, LOGIN_MAX_ATTEMPTS);
+    if (retryAfter) return tooManyAttempts(res, retryAfter);
+
     const { password } = req.body ?? {};
     const stored = db.prepare("SELECT value FROM settings WHERE key = 'admin_password'").get() as { value: string } | undefined;
     if (typeof password !== "string" || !verifyPassword(password, stored?.value)) {
+      rateConsume("login", req, LOGIN_WINDOW_MS);
       return res.status(401).json({ error: "Mot de passe incorrect" });
     }
+    // Connexion réussie : on repart de zéro, les échecs précédents sont oubliés.
+    rateReset("login", req);
     res.json({ token: createAdminToken(), mustChangePassword: isDefaultPassword() });
   });
 

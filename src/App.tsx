@@ -568,6 +568,9 @@ function AppContent() {
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loggingIn, setLoggingIn] = useState(false);
+  // Blocage anti-force-brute : fin du verrou (timestamp) + décompte affiché.
+  const [lockedUntil, setLockedUntil] = useState<number | null>(null);
+  const [lockRemaining, setLockRemaining] = useState(0);
   const [services, setServices] = useState<Service[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [settings, setSettings] = useState<AppSettings>({
@@ -648,8 +651,30 @@ function AppContent() {
     fetchSettings(true);
   };
 
+  // Fait vivre le décompte tant que le verrou court, puis rouvre le formulaire.
+  useEffect(() => {
+    if (lockedUntil === null) return;
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((lockedUntil - Date.now()) / 1000));
+      setLockRemaining(left);
+      if (left === 0) {
+        setLockedUntil(null);
+        setLoginError(null);
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [lockedUntil]);
+
+  const formatLockDelay = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const rest = seconds % 60;
+    return minutes > 0 ? `${minutes} min ${String(rest).padStart(2, '0')} s` : `${rest} s`;
+  };
+
   const handleAdminLogin = async () => {
-    if (!password || loggingIn) return;
+    if (!password || loggingIn || lockRemaining > 0) return;
     setLoggingIn(true);
     setLoginError(null);
     const result = await adminLogin(password);
@@ -658,9 +683,11 @@ function AppContent() {
       setIsAdmin(true);
       setMustChangePassword(result.mustChangePassword === true);
       setPassword('');
+      setLockedUntil(null);
       fetchSettings(true);
     } else {
       setLoginError(result.error ?? 'Mot de passe incorrect');
+      if (result.retryAfter) setLockedUntil(Date.now() + result.retryAfter * 1000);
     }
   };
 
@@ -734,17 +761,25 @@ function AppContent() {
               id="admin-password"
               type="password"
               value={password}
-              onChange={(e) => { setPassword(e.target.value); setLoginError(null); }}
+              onChange={(e) => { setPassword(e.target.value); if (lockRemaining === 0) setLoginError(null); }}
               autoFocus
               autoComplete="current-password"
               className="w-full bg-white border border-hairline rounded-[3px] px-4 py-3 mb-3 outline-none focus:border-dark transition-colors"
               onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
             />
-            {loginError && (
-              <p role="alert" className="text-sm mb-3" style={{ color: '#B23A2B' }}>{loginError}</p>
+            {(loginError || lockRemaining > 0) && (
+              <p role="alert" className="text-sm mb-3" style={{ color: '#B23A2B' }}>
+                {lockRemaining > 0
+                  ? `Trop de tentatives. Réessayez dans ${formatLockDelay(lockRemaining)}.`
+                  : loginError}
+              </p>
             )}
-            <button onClick={handleAdminLogin} disabled={loggingIn || !password} className="w-full btn-primary py-3 mt-2">
-              {loggingIn ? 'Vérification…' : 'Entrer'}
+            <button
+              onClick={handleAdminLogin}
+              disabled={loggingIn || !password || lockRemaining > 0}
+              className="w-full btn-primary py-3 mt-2"
+            >
+              {lockRemaining > 0 ? formatLockDelay(lockRemaining) : loggingIn ? 'Vérification…' : 'Entrer'}
             </button>
           </div>
           <a href="/" className="btn-ghost mx-auto mt-8 w-fit flex">
