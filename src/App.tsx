@@ -4,6 +4,7 @@ import { Scissors, Clock, MapPin, Phone, Instagram, Facebook, Menu, X, ChevronRi
 
 // --- Types ---
 import type { Service, Category, DayHours, AppSettings, GalleryImage } from './types';
+import { Monogram } from './Logo';
 import { BookingSection } from './booking/Booking';
 import { adminFetch, adminLogin, adminLogout, checkAdminSession, changeAdminPassword } from './admin/api';
 
@@ -24,7 +25,7 @@ const Navbar = ({ isAdmin }: { isAdmin: boolean }) => {
   }, []);
 
   // L'espace gérant n'a pas de hero sombre derrière la barre : sans ça, le logo
-  // s'affiche en crème sur crème et seuls les « T » et « B » dorés restent visibles.
+  // s'affiche en crème sur crème et seul le M doré reste visible.
   const onLight = scrolled || isAdmin;
 
   return (
@@ -32,11 +33,12 @@ const Navbar = ({ isAdmin }: { isAdmin: boolean }) => {
       <div className="max-w-7xl mx-auto flex justify-between items-center">
         <a
           href="#"
-          aria-label="Tom Barber — accueil"
-          className="brand-logo font-bold text-2xl md:text-4xl transition-colors duration-500"
+          aria-label="Tom Barbershop — accueil"
+          className="flex items-center gap-3 transition-colors duration-500"
           style={{ color: onLight ? 'var(--color-dark)' : 'var(--color-paper)' }}
         >
-          <span className="lead">T</span><span className="ltr">o</span><span className="ltr">m</span><span className="ltr sp"> </span><span className="lead">B</span><span className="ltr">a</span><span className="ltr">r</span><span className="ltr">b</span><span className="ltr">e</span><span className="ltr">r</span>
+          <Monogram className="h-10 md:h-12 w-auto shrink-0" aria-hidden="true" />
+          <span className="font-sans font-semibold text-[11px] md:text-[13px] tracking-[0.3em] uppercase whitespace-nowrap">Tom Barbershop</span>
         </a>
         
         {/* Espace gérant : les ancres du site public n'ont pas de sens ici. */}

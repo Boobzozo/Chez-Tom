@@ -1,5 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <rect width="64" height="64" rx="9" fill="#0E0E0E"/>
-  <text x="32" y="41" font-family="Georgia, 'Hoefler Text', 'Times New Roman', serif" font-size="30" font-weight="600" letter-spacing="-2.5" fill="#C8A968" text-anchor="middle">TB</text>
-  <rect x="20" y="46.5" width="24" height="1.6" fill="#C8A968"/>
+  <g transform="translate(11.65,10.00) scale(0.06461)">
+    <path fill="#F5F1EA" fill-rule="evenodd" d="M 0,0 L 305,0 L 305,673.5 L 133.6,545.2 A 224 224 0 0 1 179,160.4 L 179,124 L 93,124 Z M 72,36 L 269,36 L 269,142 A 224 224 0 0 0 215,148.4 L 215,88 L 111,88 Z M 179,250.3 A 146 146 0 0 0 179,481.7 Z M 215,230 A 146 146 0 0 1 269,220 L 269,601.5 L 215,561 Z"/>
+    <path fill="#A8884A" fill-rule="evenodd" d="M 325,0 L 630,0 L 537,124 L 451,124 L 451,171.8 A 233 233 0 0 1 499.5,218.6 L 581,137.1 L 581,569 L 544,569 L 544,225 L 456,313 L 361,218 L 361,601.5 L 408,566.2 L 408,333 L 456,381 L 504,333 L 504,539.2 L 325,673.5 Z M 361,36 L 558,36 L 519,88 L 415,88 L 415,150.6 A 233 233 0 0 0 361,132.6 Z"/>
+  </g>
 </svg>

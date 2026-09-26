@@ -1,0 +1,6 @@
+// Généré depuis le tracé maître (design-handoff/logo). Ne pas éditer à la main.
+export const LOGO_VIEWBOX = "0 0 630 681";
+/** Moitié gauche (T + O) — rendue en currentColor */
+export const LOGO_INK_PATH = "M 0,0 L 305,0 L 305,673.5 L 133.6,545.2 A 224 224 0 0 1 179,160.4 L 179,124 L 93,124 Z M 72,36 L 269,36 L 269,142 A 224 224 0 0 0 215,148.4 L 215,88 L 111,88 Z M 179,250.3 A 146 146 0 0 0 179,481.7 Z M 215,230 A 146 146 0 0 1 269,220 L 269,601.5 L 215,561 Z";
+/** Moitié droite (M) — rendue dans la couleur d'accent (or profond) */
+export const LOGO_ACCENT_PATH = "M 325,0 L 630,0 L 537,124 L 451,124 L 451,171.8 A 233 233 0 0 1 499.5,218.6 L 581,137.1 L 581,569 L 544,569 L 544,225 L 456,313 L 361,218 L 361,601.5 L 408,566.2 L 408,333 L 456,381 L 504,333 L 504,539.2 L 325,673.5 Z M 361,36 L 558,36 L 519,88 L 415,88 L 415,150.6 A 233 233 0 0 0 361,132.6 Z";
