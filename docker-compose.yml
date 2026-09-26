@@ -1,4 +1,4 @@
-# Déploiement du site Tom Barber.
+# Déploiement du site Tom Barbershop.
 #
 # Ce fichier ne décrit QUE ce site : son conteneur, son volume, son réseau.
 # Il ne modifie aucun autre projet du serveur (Traefik, n8n, autres domaines) et

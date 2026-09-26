@@ -1,4 +1,4 @@
-# Tom Barber — Barbier & Coiffeur
+# Tom Barbershop — Barbier & Coiffeur
 
 Site vitrine avec **réservation en ligne** et **espace gérant** pour un salon de coiffure/barbier.
 
@@ -112,11 +112,11 @@ il ne livre qu'à l'adresse du compte Resend. Le serveur l'affiche en avertissem
 Pour que les clients reçoivent l'e-mail :
 
 1. Ajouter et vérifier votre domaine sur https://resend.com/domains (enregistrements DNS DKIM/SPF).
-2. Mettre `MAIL_FROM="Tom Barber <rendez-vous@votre-domaine.fr>"` dans `.env`.
+2. Mettre `MAIL_FROM="Tom Barbershop <rendez-vous@votre-domaine.fr>"` dans `.env`.
 
 ## Avant la mise en ligne — checklist
 
-1. **Domaine** : remplacer `https://tom-barber.fr` par votre domaine réel dans
+1. **Domaine** : remplacer `https://tombarbershop.fr` par votre domaine réel dans
    `index.html` (canonical, Open Graph, JSON-LD), `public/robots.txt`, `public/sitemap.xml`.
 2. **Coordonnées du salon** : adresse/téléphone dans `index.html` (JSON-LD),
    `src/App.tsx` (pied de page), `src/booking/Booking.tsx` (`SALON_ADDRESS`) et `server.ts` (e-mail).
@@ -124,7 +124,7 @@ Pour que les clients reçoivent l'e-mail :
 3. **Images** : le hero, la section Services et l'image de partage (`og:image`) utilisent des photos
    Unsplash de démonstration — remplacez-les par les photos du salon (la galerie, elle, se gère
    depuis l'espace gérant).
-4. **Textes** : la citation, « L'histoire de Tom Barber » et les liens réseaux sociaux (`#`) du pied
+4. **Textes** : la citation, « L'histoire de Tom Barbershop » et les liens réseaux sociaux (`#`) du pied
    de page sont des placeholders.
 5. **Mentions légales / politique de confidentialité** : à rédiger selon votre société
    (obligatoire en France ; le site collecte nom, e-mail et téléphone).

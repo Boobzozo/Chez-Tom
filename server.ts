@@ -32,7 +32,15 @@ const N8N_BOOKING_WEBHOOK_URL = process.env.N8N_BOOKING_WEBHOOK_URL?.trim() || "
 const N8N_TELEGRAM_WEBHOOK_URL = process.env.N8N_TELEGRAM_WEBHOOK_URL?.trim() || "";
 // Expéditeur des emails Resend. `onboarding@resend.dev` est le bac à sable Resend :
 // il ne livre qu'à l'adresse du compte. En production, utiliser un domaine vérifié.
-const MAIL_FROM = process.env.MAIL_FROM?.trim() || "Tom Barber <onboarding@resend.dev>";
+const MAIL_FROM = process.env.MAIL_FROM?.trim() || "Tom Barbershop <onboarding@resend.dev>";
+// En-tête des e-mails : le logo (image absolue, donc il faut connaître l'origine publique
+// du site = APP_URL, déjà requis pour Google) ; sinon le nom en lettres.
+function mailHeader(): string {
+  const base = process.env.APP_URL?.trim().replace(/\/$/, "");
+  return base
+    ? `<p style="text-align: center; margin: 0 0 24px;"><img src="${base}/brand/logo-email.png" alt="Tom Barbershop" width="300" style="display: inline-block; width: 300px; max-width: 100%; height: auto;" /></p>`
+    : `<h1 style="text-align: center; color: #A8884A; letter-spacing: 0.2em; font-weight: 400;">TOM BARBERSHOP</h1>`;
+}
 
 // Photos de la galerie : fichiers sur disque (servis sur /uploads), jamais en base.
 const UPLOADS_DIR = process.env.UPLOADS_DIR?.trim() || path.resolve(__dirname, "uploads");
@@ -597,10 +605,10 @@ async function sendBookingConfirmationEmail(opts: {
     await resend.emails.send({
       from: MAIL_FROM,
       to: opts.to,
-      subject: 'Confirmation de votre rendez-vous - Tom Barber',
+      subject: 'Confirmation de votre rendez-vous - Tom Barbershop',
       html: `
                 <div style="font-family: Georgia, serif; color: #1A1A1A; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #E2DACB;">
-                  <h1 style="text-align: center; color: #A8884A; letter-spacing: 0.2em; font-weight: 400;">TOM BARBER</h1>
+                  ${mailHeader()}
                   <p>Bonjour <strong>${escapeHtml(opts.customerName)}</strong>,</p>
                   <p>Votre rendez-vous est confirmé. Nous avons hâte de vous accueillir.</p>
                   <div style="background-color: #F5F1EA; padding: 18px; margin: 20px 0; border-left: 3px solid #C8A968;">
@@ -612,7 +620,7 @@ async function sendBookingConfirmationEmail(opts: {
                   <p style="font-size: 14px; color: #6E6A63;">Adresse : Martigné-sur-Mayenne, 53470</p>
                   <p style="font-size: 14px; color: #6E6A63;">Téléphone : 01 23 45 67 89</p>
                   <hr style="border: 0; border-top: 1px solid #E2DACB; margin: 20px 0;" />
-                  <p style="text-align: center; font-size: 12px; color: #8A857C;">&copy; ${new Date().getFullYear()} Tom Barber. Tous droits réservés.</p>
+                  <p style="text-align: center; font-size: 12px; color: #8A857C;">&copy; ${new Date().getFullYear()} Tom Barbershop. Tous droits réservés.</p>
                 </div>
               `
     });
@@ -1494,7 +1502,7 @@ async function startServer() {
           `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
           {
             summary: `${booking.customer_name} (${booking.service_type})`,
-            description: `Réservation via le site Tom Barber. Client: ${booking.customer_name} (${booking.customer_email})`,
+            description: `Réservation via le site Tom Barbershop. Client: ${booking.customer_name} (${booking.customer_email})`,
             start: { 
               dateTime: cleanStart,
               timeZone: 'Europe/Paris' 

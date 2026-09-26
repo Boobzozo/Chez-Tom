@@ -98,7 +98,7 @@ const Hero = () => (
     >
       <img
         src="https://images.unsplash.com/photo-1503951914875-452162b0f3f1?auto=format&fit=crop&q=80&w=2000"
-        alt="Salon de coiffure Tom Barber - Ambiance authentique et élégante"
+        alt="Salon de coiffure Tom Barbershop - Ambiance authentique et élégante"
         className="w-full h-full object-cover"
         referrerPolicy="no-referrer"
         fetchPriority="high"
@@ -121,7 +121,7 @@ const Hero = () => (
         transition={{ delay: 0.2 }}
         className="text-5xl md:text-8xl font-serif mb-8 leading-tight luxury-text-shadow text-paper"
       >
-        Tom <br /> <span className="italic text-gold">Barber</span>
+        Tom <br /> <span className="italic text-gold">Barbershop</span>
       </motion.h1>
       <motion.div
         initial={{ opacity: 0, y: 10 }}
@@ -266,7 +266,7 @@ const Services = ({ services, categories }: { services: Service[], categories: C
               <div className="h-full min-h-[500px] overflow-hidden rounded-[2.5rem] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.15)] relative group">
                 <img
                   src="https://images.unsplash.com/photo-1503951914875-452162b0f3f1?auto=format&fit=crop&q=80&w=1000"
-                  alt="Ambiance du salon Tom Barber"
+                  alt="Ambiance du salon Tom Barbershop"
                   className="w-full h-full object-cover transition-transform duration-[2000ms] group-hover:scale-110"
                   referrerPolicy="no-referrer"
                   loading="lazy"
@@ -285,7 +285,7 @@ const Services = ({ services, categories }: { services: Service[], categories: C
                     </p>
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-px bg-gold"></div>
-                      <span className="text-[10px] uppercase tracking-[0.4em] text-paper/50 font-bold">L'esprit Tom Barber</span>
+                      <span className="text-[10px] uppercase tracking-[0.4em] text-paper/50 font-bold">L'esprit Tom Barbershop</span>
                     </div>
                   </motion.div>
                 </div>
@@ -348,7 +348,7 @@ const Gallery = () => {
             >
               <img
                 src={img.url}
-                alt={img.caption || 'Réalisation du salon Tom Barber'}
+                alt={img.caption || 'Réalisation du salon Tom Barbershop'}
                 className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                 referrerPolicy="no-referrer"
                 loading="lazy"
@@ -378,7 +378,8 @@ const Footer = ({ openingHours }: { openingHours: Record<string, DayHours> }) =>
     <footer id="contact" className="bg-dark text-paper py-24 px-6">
       <div className="max-w-7xl mx-auto grid md:grid-cols-3 gap-16">
         <div>
-          <h2 className="text-3xl font-serif mb-8">Tom Barber</h2>
+          <Monogram className="h-14 w-auto mb-5" aria-hidden="true" />
+          <h2 className="text-3xl font-serif mb-8">Tom Barbershop</h2>
           <p className="text-paper/40 leading-relaxed mb-8">
             Votre barbier de confiance au cœur de la ville. Tradition et modernité se rencontrent pour sublimer votre style.
           </p>
@@ -423,7 +424,7 @@ const Footer = ({ openingHours }: { openingHours: Record<string, DayHours> }) =>
         </div>
       </div>
       <div className="max-w-7xl mx-auto mt-24 pt-8 border-t border-paper/5 text-center text-[10px] uppercase tracking-widest text-paper/20">
-        <span>&copy; {new Date().getFullYear()} Tom Barber. Tous droits réservés.</span>
+        <span>&copy; {new Date().getFullYear()} Tom Barbershop. Tous droits réservés.</span>
       </div>
     </footer>
   );
@@ -517,8 +518,8 @@ const SetPasswordScreen = ({ onDone, onLogout }: { onDone: () => void; onLogout:
     <div className="min-h-screen bg-paper flex items-center justify-center p-6 selection:bg-gold selection:text-dark">
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="text-2xl font-serif font-bold tracking-[0.3em] text-dark">TOM BARBER</div>
-          <div className="mono-label text-gold-deep mt-3">Première connexion</div>
+          <Monogram className="h-16 w-auto mx-auto text-dark" role="img" aria-label="Tom Barbershop" />
+          <div className="mono-label text-gold-deep mt-4">Première connexion</div>
         </div>
         <div className="bg-white border border-hairline rounded-[4px] p-8 shadow-sm">
           <p className="text-sm text-muted-deep leading-relaxed mb-6">
@@ -711,7 +712,7 @@ function AppContent() {
     if (!sessionChecked) {
       return (
         <div className="min-h-screen bg-paper flex items-center justify-center">
-          <span className="mono-label text-muted-deep animate-pulse">Tom Barber…</span>
+          <span className="mono-label text-muted-deep animate-pulse">Tom Barbershop…</span>
         </div>
       );
     }
@@ -754,8 +755,8 @@ function AppContent() {
           className="w-full max-w-sm"
         >
           <div className="text-center mb-8">
-            <div className="text-2xl font-serif font-bold tracking-[0.3em] text-dark">TOM BARBER</div>
-            <div className="mono-label text-gold-deep mt-3">Espace gérant</div>
+            <Monogram className="h-16 w-auto mx-auto text-dark" role="img" aria-label="Tom Barbershop" />
+            <div className="mono-label text-gold-deep mt-4">Espace gérant</div>
           </div>
           <div className="bg-white border border-hairline rounded-[4px] p-8 shadow-sm">
             <label htmlFor="admin-password" className="mono-label text-muted-deep block mb-2">Mot de passe</label>
@@ -819,7 +820,7 @@ function AppContent() {
             transition={{ duration: 1, ease: "easeOut" }}
             className="max-w-4xl mx-auto text-center"
           >
-            <h2 className="text-4xl font-serif mb-2">L'histoire de Tom Barber</h2>
+            <h2 className="text-4xl font-serif mb-2">L'histoire de Tom Barbershop</h2>
             <div className="w-12 h-[1px] bg-gold mx-auto mb-12"></div>
             <p className="text-lg text-dark/60 leading-relaxed italic px-8">
               "Passionné par l'art du barbier depuis plus de 10 ans, j'ai créé ce salon pour offrir aux hommes un espace où le temps s'arrête. Ici, on ne vient pas seulement pour une coupe, mais pour un moment de détente et de soin."

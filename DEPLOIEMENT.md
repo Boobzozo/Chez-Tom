@@ -1,4 +1,4 @@
-# Déploiement — Tom Barber
+# Déploiement — Tom Barbershop
 
 Le site se déploie comme un **projet Docker autonome** : son conteneur, son volume,
 son réseau, son `.env`. Il se place derrière un reverse proxy Traefik déjà présent

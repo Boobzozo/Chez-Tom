@@ -155,10 +155,10 @@ export const BookingSection = ({
     const toGcal = (iso: string) => iso.replace(/[-:]/g, '');
     const params = new URLSearchParams({
       action: 'TEMPLATE',
-      text: `Tom Barber · ${selectedService?.name ?? 'Rendez-vous'}`,
+      text: `Tom Barbershop · ${selectedService?.name ?? 'Rendez-vous'}`,
       dates: `${toGcal(start)}/${toGcal(end)}`,
       location: SALON_ADDRESS,
-      details: 'Votre rendez-vous chez Tom Barber.',
+      details: 'Votre rendez-vous chez Tom Barbershop.',
     });
     return `https://calendar.google.com/calendar/render?${params.toString()}`;
   };
