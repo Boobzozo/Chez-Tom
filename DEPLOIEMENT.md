@@ -32,6 +32,18 @@ sont jamais touchés.
 Deux valeurs seulement dépendent de la machine, toutes deux dans `.env` :
 `APP_HOST` (le domaine) et `PROXY_NETWORK` (le réseau de Traefik).
 
+## Serveur actuel
+
+| | |
+|---|---|
+| VPS | Hostinger `srv2030806.hstgr.cloud` — IP `82.29.172.57` (depuis le 03/10/2026) |
+| Site | `https://demo.srv2030806.hstgr.cloud` — dossier `/srv/apps/chez-tom`, conteneur `chez-tom`, volume `chez-tom-data` |
+| Réseau Traefik | `root_default`, résolveur `mytlschallenge` |
+| n8n | `https://n8n.kerkarin.fr` (autre projet, même machine — ne pas y toucher depuis ici) |
+
+Ancien serveur : `srv1043923.hstgr.cloud` (`72.60.190.248`), éteint le 03/10/2026.
+Plus rien ne doit y faire référence.
+
 ## Prérequis
 
 - Un VPS Linux avec Docker et Docker Compose v2
@@ -132,14 +144,38 @@ volume existant avec ses données.
 - L'URL de redirection OAuth dans la console Google si `APP_HOST` change
 - Les workflows n8n et les URL de webhooks dans `.env` si n8n déménage aussi
 
+**5. Ce que la migration du 03/10/2026 a appris**
+
+- **Le nom `demo.srv….hstgr.cloud` appartient à Hostinger, pas au projet.** Il est
+  attaché à la machine et meurt avec elle : impossible de le faire pointer vers
+  le nouveau serveur. Chaque changement de VPS change donc l'adresse du site,
+  l'URL de redirection OAuth et, si n8n est sur la même machine, l'adresse des
+  webhooks. Seul un vrai nom de domaine survit à une migration.
+- Pour la même raison, n8n a reçu un nom qui ne dépend plus de la machine
+  (`n8n.kerkarin.fr`). Les chemins `/webhook/...` n'ont pas bougé : seul le nom
+  d'hôte est à remplacer chez les appelants.
+- **Recenser tous les appelants de n8n avant d'éteindre l'ancien serveur**, pas
+  seulement ce dépôt : une ancienne version du site déployée ailleurs peut avoir
+  l'adresse des webhooks écrite en dur dans son code (c'était le cas avant la
+  configuration par `.env`). Chercher l'ancien nom avec
+  `grep -rn "srv<ancien>" .` et dans la configuration de chaque déploiement.
+- La liaison Google Agenda survit au déménagement : le jeton de rafraîchissement
+  est dans la base, donc dans le volume. La nouvelle URL de redirection ne sert
+  qu'à refaire la liaison plus tard — l'ajouter quand même tout de suite.
+- Après restauration, comparer le contenu de la base des deux côtés avant
+  l'extinction de l'ancien serveur. L'empreinte du fichier change dès la première
+  visite (renouvellement du jeton Google) : comparer les tables, pas le fichier.
+- Garder l'ancien `.env` à côté du nouveau (`.env.avant-migration`) le temps de
+  tout vérifier.
+
 ## Architecture cible
 
-Sur le VPS actuel (template « Ubuntu with n8n » de Hostinger), Traefik et n8n
+Sur le VPS actuel (template « Ubuntu with n8n » de Hostinger, comme le précédent), Traefik et n8n
 partagent un même projet Docker et un même réseau, `root_default`. Le site s'y
 raccroche : c'est fonctionnel, mais tous les conteneurs de ce réseau peuvent se
 joindre entre eux.
 
-Sur le prochain serveur, monter plutôt ceci :
+À terme, monter plutôt ceci :
 
 ```
 /srv/
